@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E0F13">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Trigger">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<!-- Inietta gli header Cross-Origin-Opener-Policy / Cross-Origin-Embedder-Policy via
+     service worker, necessari per SharedArrayBuffer (richiesto dal modulo WebAssembly
+     di web-gphoto2). GitHub Pages non permette di impostare header custom, quindi
+     questo script (scaricato a parte, vedi istruzioni) risolve il problema lato client. -->
+<script src="coi-serviceworker.js"></script>
+<title>Trigger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0E0F13;
+    --panel: #17181D;
+    --panel-2: #1E2026;
+    --line: #2A2C33;
+    --text: #F2F2F5;
+    --muted: #83868F;
+    --muted-2: #55575F;
+    --accent: #F0A93C;
+    --accent-dim: #6B551F;
+    --live: #FF5B45;
+    --live-dim: #4A241D;
+    --trace: #57D6C4;
+    --font-display: 'Space Grotesk', -apple-system, sans-serif;
+    --font-body: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: var(--font-body);
+    overscroll-behavior: none;
+  }
+  body { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+
+  /* ---------- header ---------- */
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: max(14px, env(safe-area-inset-top)) 16px 10px;
+    flex-shrink: 0; position: relative; z-index: 5;
+  }
+  header.overlay-header {
+    position: absolute; top: 0; left: 0; right: 0;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
+  }
+  .icon-btn {
+    width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--text); font-size: 16px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  header.overlay-header .icon-btn { background: rgba(23,24,29,0.7); border-color: rgba(255,255,255,0.1); backdrop-filter: blur(4px); }
+  .icon-btn:active { background: var(--panel-2); }
+  .header-title {
+    font-family: var(--font-display); font-weight: 700; font-size: 17px;
+    flex: 1; display: flex; align-items: center; gap: 8px;
+  }
+  .header-title .tab-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .status {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 11.5px; color: var(--muted); font-family: var(--font-display);
+    letter-spacing: 0.02em; flex-shrink: 0;
+  }
+  .dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--muted-2);
+    box-shadow: 0 0 0 0 transparent; transition: background 0.2s;
+  }
+  .dot.online { background: var(--trace); box-shadow: 0 0 8px 0 rgba(87,214,196,0.6); }
+  .dot.offline { background: var(--live); box-shadow: 0 0 8px 0 rgba(255,91,69,0.5); }
+
+  /* ---------- drawer menu ---------- */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 40; }
+  .overlay.open { opacity: 1; pointer-events: auto; }
+  .drawer {
+    position: fixed; top: 0; bottom: 0; left: 0; width: 78%; max-width: 300px;
+    background: var(--panel); border-right: 1px solid var(--line);
+    transform: translateX(-100%); transition: transform 0.22s ease; z-index: 41;
+    display: flex; flex-direction: column;
+    padding: max(20px, env(safe-area-inset-top)) 0 max(16px, env(safe-area-inset-bottom));
+  }
+  .drawer.open { transform: translateX(0); }
+  .drawer-brand { font-family: var(--font-display); font-weight: 700; font-size: 19px; padding: 0 20px 18px; display: flex; align-items: center; justify-content: space-between; }
+  .drawer-brand .dim { color: var(--muted-2); font-weight: 500; }
+  .drawer-close { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .drawer-section { font-family: var(--font-display); font-size: 10.5px; font-weight: 600; letter-spacing: 0.09em; color: var(--muted-2); text-transform: uppercase; padding: 14px 20px 6px; }
+  .drawer-item { display: flex; align-items: center; gap: 12px; padding: 13px 20px; border: none; background: transparent; color: var(--text); font-family: var(--font-body); font-size: 14.5px; font-weight: 500; width: 100%; text-align: left; }
+  .drawer-item .tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-2); flex-shrink: 0; }
+  .drawer-item.active { background: var(--panel-2); }
+  .drawer-item.active .tab-dot.flash { background: var(--live); }
+  .drawer-item.active .tab-dot.interval { background: var(--trace); }
+  .drawer-item.active .tab-dot.sun { background: var(--accent); }
+  .drawer-item .badge {
+    margin-left: auto; font-family: var(--font-display); font-size: 10.5px; font-weight: 600; color: var(--muted);
+    font-variant-numeric: tabular-nums; padding: 2px 7px; border-radius: 10px; background: var(--panel-2); letter-spacing: 0.03em;
+  }
+  .drawer-item .badge.on-flash { color: var(--live); background: rgba(255,91,69,0.14); }
+  .drawer-item .badge.on-interval { color: var(--trace); background: rgba(87,214,196,0.14); }
+  .drawer-item .badge.on-sun { color: var(--accent); background: rgba(240,169,60,0.14); }
+  .drawer-spacer { flex: 1; }
+
+  /* ---------- screens ---------- */
+  .screens { flex: 1; overflow: hidden; position: relative; }
+  .screen { position: absolute; inset: 0; overflow-y: auto; display: none; flex-direction: column; }
+  .screen.active { display: flex; animation: screenIn 0.18s ease; }
+  .screen.scroll-pad { padding-bottom: 16px; }
+  @keyframes screenIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* ---------- viewfinder (schermata Flash, stile fotocamera) ---------- */
+  #screen-flash { overflow: hidden; }
+  .viewfinder { position: relative; flex: 1; background: #000; overflow: hidden; }
+  video { width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0.85; }
+  canvas.hidden { display: none; }
+
+  .trace-canvas { position: absolute; left: 0; right: 0; bottom: 0; height: 58px; display: block; }
+  .trace-shade { position: absolute; left: 0; right: 0; bottom: 0; height: 90px; background: linear-gradient(to top, rgba(0,0,0,0.7), transparent); pointer-events: none; }
+
+  .readout {
+    position: absolute; top: max(64px, calc(env(safe-area-inset-top) + 50px)); left: 16px;
+    font-family: var(--font-display); font-weight: 600; font-size: 13px;
+    color: var(--trace); font-variant-numeric: tabular-nums;
+    display: flex; align-items: baseline; gap: 5px;
+    background: rgba(0,0,0,0.35); padding: 5px 10px; border-radius: 9px; backdrop-filter: blur(3px);
+  }
+  .readout .lbl { font-family: var(--font-body); font-weight: 500; font-size: 10.5px; color: var(--muted); }
+
+  .gear-fab {
+    position: absolute; top: max(64px, calc(env(safe-area-inset-top) + 50px)); right: 16px;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: rgba(0,0,0,0.35); backdrop-filter: blur(3px); border: 1px solid rgba(255,255,255,0.12);
+    color: var(--text); font-size: 15px; display: flex; align-items: center; justify-content: center;
+  }
+
+  .flash-flag {
+    position: absolute; top: max(108px, calc(env(safe-area-inset-top) + 94px)); right: 16px;
+    padding: 5px 10px; border-radius: 20px;
+    font-family: var(--font-display); font-weight: 600; font-size: 11px; letter-spacing: 0.03em;
+    background: rgba(255,91,69,0.2); color: var(--live);
+    border: 1px solid rgba(255,91,69,0.4);
+    opacity: 0; transform: scale(0.9);
+    transition: opacity 0.12s, transform 0.12s;
+  }
+  .flash-flag.show { opacity: 1; transform: scale(1); }
+
+  /* ---------- panels (usati in Intervallo, Alba, Statistiche, Connessione) ---------- */
+  .eyebrow { margin: 18px 20px 0; font-family: var(--font-display); font-size: 10.5px; font-weight: 600; letter-spacing: 0.09em; color: var(--muted-2); text-transform: uppercase; }
+  .panel { margin: 8px 20px 0; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 4px 16px; flex-shrink: 0; }
+  .ctrl { padding: 13px 0; display: flex; flex-direction: column; gap: 8px; }
+  .ctrl + .ctrl { border-top: 1px solid var(--line); }
+  .ctrl-head { display: flex; align-items: baseline; justify-content: space-between; }
+  .ctrl-head .name { font-size: 13px; color: var(--muted); font-weight: 500; }
+  .ctrl-head .num { font-family: var(--font-display); font-weight: 600; font-size: 15px; color: var(--text); font-variant-numeric: tabular-nums; }
+
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 3px; border-radius: 2px; background: var(--line); outline: none; margin: 4px 0; }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent); border: 3px solid var(--bg); box-shadow: 0 0 0 1px var(--accent); margin-top: -1px;
+  }
+  input[type="range"]#delay::-webkit-slider-thumb,
+  input[type="range"]#cooldown::-webkit-slider-thumb,
+  input[type="range"]#burstInterval::-webkit-slider-thumb { background: var(--trace); box-shadow: 0 0 0 1px var(--trace); }
+
+  .field-row { display: flex; align-items: center; justify-content: space-between; padding: 13px 0; gap: 12px; }
+  .field-row + .field-row { border-top: 1px solid var(--line); }
+  .field-row .name { font-size: 13px; color: var(--muted); font-weight: 500; }
+
+  input[type="text"] {
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 8px; padding: 8px 10px; font-size: 14px; width: 138px;
+    text-align: right; font-family: var(--font-display); font-variant-numeric: tabular-nums;
+  }
+  input[type="text"]:focus { outline: none; border-color: var(--accent); }
+
+  .btn-ghost { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 500; font-family: var(--font-body); }
+  .btn-ghost:active { background: var(--line); }
+
+  .hidden-panel { display: none !important; }
+
+  /* ---------- log ---------- */
+  .log { margin: 8px 20px 0; padding: 2px 16px; font-family: var(--font-display); font-size: 12.5px; color: var(--muted); }
+  .log-row { padding: 6px 0; display: flex; gap: 10px; }
+  .log-row + .log-row { border-top: 1px solid var(--line); }
+  .log-row .t { color: var(--muted-2); flex-shrink: 0; }
+  .log-row.trigger .t { color: var(--live); }
+  .log-row.ok .t { color: var(--trace); }
+  .log-empty { padding: 24px 20px; text-align: center; color: var(--muted-2); font-size: 13px; }
+
+  /* ---------- barra di controllo condivisa (pillole modalità + scatto) ---------- */
+  .control-bar {
+    flex-shrink: 0; z-index: 6;
+    padding: 12px 20px max(14px, env(safe-area-inset-bottom));
+  }
+  .control-bar.on-viewfinder {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.6), transparent 90%);
+  }
+  .control-bar.docked { border-top: 1px solid var(--line); background: var(--bg); }
+
+  .mode-pills { display: flex; gap: 8px; margin-bottom: 14px; }
+  .mode-pill {
+    flex: 1; text-align: center; padding: 8px 4px; border-radius: 20px;
+    border: 1px solid var(--line); background: rgba(23,24,29,0.55); backdrop-filter: blur(3px);
+    color: var(--muted); font-family: var(--font-display); font-weight: 600; font-size: 11px; letter-spacing: 0.02em;
+  }
+  .mode-pill.active { color: var(--text); border-color: rgba(255,255,255,0.18); background: rgba(46,48,58,0.75); }
+  .mode-pill.active[data-screen="flash"] { color: var(--live); }
+  .mode-pill.active[data-screen="interval"] { color: var(--trace); }
+  .mode-pill.active[data-screen="sun"] { color: var(--accent); }
+
+  .shutter-row { display: flex; align-items: center; justify-content: center; position: relative; height: 76px; }
+  .shutter-btn {
+    width: 70px; height: 70px; border-radius: 50%; border: 4px solid rgba(255,255,255,0.14);
+    background: var(--accent); color: #1A1200;
+    font-family: var(--font-display); font-weight: 700; font-size: 10.5px; letter-spacing: 0.02em;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, color 0.15s, transform 0.08s;
+  }
+  .shutter-btn.armed { background: var(--live); color: #2A0803; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,91,69,0.4); }
+    50% { box-shadow: 0 0 0 10px rgba(255,91,69,0); }
+  }
+  .shutter-btn:active { transform: scale(0.95); }
+
+  .hint { text-align: center; font-size: 12px; color: var(--muted-2); margin-top: 10px; min-height: 15px; }
+  .control-bar.on-viewfinder .hint { color: rgba(242,242,245,0.6); }
+
+  .offset-val { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
+  .offset-val.neg { color: var(--trace); }
+  .offset-val.pos { color: var(--accent); }
+
+  .sun-toggle { display: flex; gap: 8px; padding: 13px 0; }
+  .sun-toggle button { flex: 1; padding: 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-family: var(--font-body); font-weight: 500; font-size: 13.5px; }
+  .sun-toggle button.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+
+  .schedule-status { padding: 12px 0 13px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); }
+  .schedule-status .big { font-family: var(--font-display); font-weight: 600; font-size: 17px; color: var(--text); margin-top: 3px; }
+
+  /* ---------- stat cards ---------- */
+  .stats-row { display: flex; gap: 10px; margin: 8px 20px 0; flex-shrink: 0; }
+  .stat-card { flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  .stat-card .stat-label { font-size: 11.5px; color: var(--muted); font-weight: 500; display: flex; align-items: center; gap: 5px; }
+  .stat-card .stat-label .glyph { color: var(--accent); font-size: 12px; }
+  .stat-card .stat-num { font-family: var(--font-display); font-weight: 700; font-size: 28px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .times-list { margin: 8px 20px 0; }
+  .times-list .chip { display: inline-block; background: var(--panel-2); border: 1px solid var(--line); border-radius: 20px; padding: 5px 11px; font-family: var(--font-display); font-size: 12px; color: var(--muted); margin: 0 6px 6px 0; }
+
+  /* ---------- foglio impostazioni (Flash) ---------- */
+  .sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 30; }
+  .sheet-overlay.open { opacity: 1; pointer-events: auto; }
+  .sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; max-height: 80vh; overflow-y: auto;
+    background: var(--panel); border-top: 1px solid var(--line); border-radius: 20px 20px 0 0;
+    transform: translateY(100%); transition: transform 0.22s ease; z-index: 31;
+    padding: 12px 0 max(20px, env(safe-area-inset-bottom));
+  }
+  .sheet.open { transform: translateY(0); }
+  .sheet-handle { width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto 14px; }
+  .sheet-title { font-family: var(--font-display); font-weight: 700; font-size: 16px; padding: 0 20px 4px; }
+</style>
+</head>
+<body>
+
+<div class="overlay" id="overlay"></div>
+<nav class="drawer" id="drawer">
+  <div class="drawer-brand">
+    <span>TRIGGER<span class="dim"> / A6100</span></span>
+    <button class="drawer-close" id="drawerCloseBtn">✕</button>
+  </div>
+
+  <div class="drawer-section">Modalità di scatto</div>
+  <button class="drawer-item active" data-screen="flash"><span class="tab-dot flash"></span>Flash<span class="badge" id="badgeFlash"></span></button>
+  <button class="drawer-item" data-screen="interval"><span class="tab-dot interval"></span>Intervallo<span class="badge" id="badgeInterval"></span></button>
+  <button class="drawer-item" data-screen="sun"><span class="tab-dot sun"></span>Alba/Tramonto<span class="badge" id="badgeSun"></span></button>
+
+  <div class="drawer-section">Info</div>
+  <button class="drawer-item" data-screen="stats">Statistiche</button>
+  <button class="drawer-item" data-screen="log">Registro eventi</button>
+
+  <div class="drawer-section">Sistema</div>
+  <button class="drawer-item" data-screen="camera">Fotocamera</button>
+
+  <div class="drawer-spacer"></div>
+</nav>
+
+<div class="sheet-overlay" id="sheetOverlay"></div>
+<div class="sheet" id="sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">Impostazioni Flash</div>
+  <div class="panel">
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Soglia sensibilità</span><span class="num" id="thresholdVal">35</span></div>
+      <input type="range" id="threshold" min="5" max="90" value="35">
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Ritardo scatto</span><span class="num" id="delayVal">0 ms</span></div>
+      <input type="range" id="delay" min="0" max="500" value="0">
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Pausa tra scatti</span><span class="num" id="cooldownVal">1.2 s</span></div>
+      <input type="range" id="cooldown" min="200" max="5000" value="1200" step="100">
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Scatti in raffica</span><span class="num" id="burstCountVal">1</span></div>
+      <input type="range" id="burstCount" min="1" max="10" value="1">
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Intervallo raffica</span><span class="num" id="burstIntervalVal">0 ms</span></div>
+      <input type="range" id="burstInterval" min="0" max="500" value="0" step="10">
+    </div>
+  </div>
+  <div class="panel">
+    <div class="field-row">
+      <span class="name">Filtro scena intelligente</span>
+      <button class="btn-ghost" id="sceneToggle">Off</button>
+    </div>
+    <div id="sceneControls" class="hidden-panel">
+      <div class="ctrl">
+        <div class="ctrl-head"><span class="name">Uniformità minima</span><span class="num" id="uniformityMinVal">50%</span></div>
+        <input type="range" id="uniformityMin" min="10" max="90" value="50" step="5">
+      </div>
+      <div class="field-row">
+        <span class="name">Richiedi salita istantanea</span>
+        <button class="btn-ghost" id="suddenToggle">Sì</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<header class="overlay-header" id="mainHeader">
+  <button class="icon-btn" id="menuBtn">☰</button>
+  <div class="header-title"><span class="tab-dot" id="headerDot"></span><span id="headerTitle">Flash</span></div>
+  <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">OFFLINE</span></div>
+</header>
+
+<div class="screens">
+
+  <div class="screen active" data-screen="flash" id="screen-flash">
+    <div class="viewfinder">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="analyzeCanvas" class="hidden"></canvas>
+      <div class="readout"><span class="lbl">Δ</span><span id="luxValue">0.0</span><span class="lbl" style="margin-left:8px;">unif</span><span id="uniformityValue">—</span></div>
+      <button class="gear-fab" id="gearBtn">⚙</button>
+      <div class="flash-flag" id="flashFlag">LAMPO</div>
+      <div class="trace-shade"></div>
+      <canvas id="traceCanvas" class="trace-canvas"></canvas>
+    </div>
+  </div>
+
+  <div class="screen scroll-pad" data-screen="interval">
+    <div class="panel" style="margin-top:64px;">
+      <div class="ctrl">
+        <div class="ctrl-head"><span class="name">Intervallo tra scatti</span><span class="num" id="intervalVal">5 s</span></div>
+        <input type="range" id="intervalSec" min="1" max="300" value="5">
+      </div>
+      <div class="field-row">
+        <span class="name">Numero scatti (0 = infinito)</span>
+        <input type="text" id="intervalCount" inputmode="numeric" value="0">
+      </div>
+      <div class="field-row">
+        <span class="name">Durata max minuti (0 = nessuna)</span>
+        <input type="text" id="intervalDuration" inputmode="numeric" value="0">
+      </div>
+      <div class="schedule-status" id="intervalStatus">In attesa di avvio</div>
+    </div>
+  </div>
+
+  <div class="screen scroll-pad" data-screen="sun">
+    <div class="panel" style="margin-top:64px;">
+      <div class="sun-toggle">
+        <button id="sunAlba" class="active" data-event="alba">Alba</button>
+        <button id="sunTramonto" data-event="tramonto">Tramonto</button>
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-head">
+          <span class="name">Scarto dall'evento</span>
+          <span class="offset-val" id="offsetVal">0 min</span>
+        </div>
+        <input type="range" id="sunOffset" min="-60" max="60" value="0">
+      </div>
+      <div class="field-row">
+        <span class="name">Posizione</span>
+        <button class="btn-ghost" id="gpsBtn">Usa GPS</button>
+      </div>
+      <div class="schedule-status" id="sunStatus">Posizione non ancora rilevata</div>
+    </div>
+  </div>
+
+  <div class="screen scroll-pad" data-screen="stats">
+    <div class="stats-row" style="margin-top:64px;">
+      <div class="stat-card">
+        <div class="stat-label"><span class="glyph">⚡</span>Lampi oggi</div>
+        <div class="stat-num" id="statsToday">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label"><span class="glyph">Σ</span>Totale storico</div>
+        <div class="stat-num" id="statsTotal">—</div>
+      </div>
+    </div>
+    <div class="eyebrow">Orari di oggi</div>
+    <div class="times-list" id="timesList"><span class="log-empty">Nessun lampo rilevato oggi</span></div>
+  </div>
+
+  <div class="screen scroll-pad" data-screen="log">
+    <div class="log" id="log" style="margin-top:64px;"></div>
+  </div>
+
+  <div class="screen scroll-pad" data-screen="camera">
+    <div class="panel" style="margin-top:64px;">
+      <div class="field-row">
+        <span class="name">Fotocamera</span>
+        <span id="cameraStatusText" style="color:var(--muted); font-size:13px;">non connessa</span>
+      </div>
+      <div class="field-row">
+        <span class="name">Seleziona e connetti via USB</span>
+        <button class="btn-ghost" id="cameraConnectBtn">Connetti</button>
+      </div>
+    </div>
+    <div class="eyebrow">Come funziona</div>
+    <div class="panel">
+      <p style="font-size:13px; color:var(--muted); line-height:1.5; margin:10px 0;">
+        Collega la A6100 al telefono con un cavo USB-OTG, impostala su
+        "Collegamento PC remoto", poi tocca Connetti — il browser
+        chiederà quale dispositivo USB condividere con la pagina.
+        Nessun Pi, nessun server: lo scatto parte direttamente da qui.
+      </p>
+    </div>
+  </div>
+
+</div>
+
+<div class="control-bar on-viewfinder" id="controlBar">
+  <div class="mode-pills">
+    <button class="mode-pill active" data-screen="flash">FLASH</button>
+    <button class="mode-pill" data-screen="interval">INTERVALLO</button>
+    <button class="mode-pill" data-screen="sun">ALBA/TRAMONTO</button>
+  </div>
+  <div class="shutter-row">
+    <button class="shutter-btn" id="shutterBtn">ARMA</button>
+  </div>
+  <div class="hint" id="hint">Punta il telefono verso il flash, poi attiva</div>
+</div>
+
+<script>
+const video = document.getElementById('video');
+const analyzeCanvas = document.getElementById('analyzeCanvas');
+const actx = analyzeCanvas.getContext('2d', { willReadFrequently: true });
+const traceCanvas = document.getElementById('traceCanvas');
+const tctx = traceCanvas.getContext('2d');
+
+const thresholdEl = document.getElementById('threshold');
+const thresholdVal = document.getElementById('thresholdVal');
+const delayEl = document.getElementById('delay');
+const delayVal = document.getElementById('delayVal');
+const cooldownEl = document.getElementById('cooldown');
+const cooldownVal = document.getElementById('cooldownVal');
+const burstCountEl = document.getElementById('burstCount');
+const burstCountVal = document.getElementById('burstCountVal');
+const burstIntervalEl = document.getElementById('burstInterval');
+const burstIntervalVal = document.getElementById('burstIntervalVal');
+const sceneToggle = document.getElementById('sceneToggle');
+const sceneControls = document.getElementById('sceneControls');
+const uniformityMinEl = document.getElementById('uniformityMin');
+const uniformityMinVal = document.getElementById('uniformityMinVal');
+const suddenToggle = document.getElementById('suddenToggle');
+const uniformityValue = document.getElementById('uniformityValue');
+
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const luxValue = document.getElementById('luxValue');
+const flashFlag = document.getElementById('flashFlag');
+const logEl = document.getElementById('log');
+
+const statsToday = document.getElementById('statsToday');
+const statsTotal = document.getElementById('statsTotal');
+const timesList = document.getElementById('timesList');
+
+const intervalSecEl = document.getElementById('intervalSec');
+const intervalVal = document.getElementById('intervalVal');
+const intervalCountEl = document.getElementById('intervalCount');
+const intervalDurationEl = document.getElementById('intervalDuration');
+const intervalStatus = document.getElementById('intervalStatus');
+
+const sunAlbaBtn = document.getElementById('sunAlba');
+const sunTramontoBtn = document.getElementById('sunTramonto');
+const sunOffsetEl = document.getElementById('sunOffset');
+const offsetVal = document.getElementById('offsetVal');
+const gpsBtn = document.getElementById('gpsBtn');
+const sunStatus = document.getElementById('sunStatus');
+
+const shutterBtn = document.getElementById('shutterBtn');
+const hintEl = document.getElementById('hint');
+const controlBar = document.getElementById('controlBar');
+const mainHeader = document.getElementById('mainHeader');
+const modePills = document.querySelectorAll('.mode-pill');
+
+const cameraStatusText = document.getElementById('cameraStatusText');
+const cameraConnectBtn = document.getElementById('cameraConnectBtn');
+
+let mode = 'flash';
+let armed = false;
+let baseline = null;
+let lastTrigger = 0;
+let traceBuffer = [];
+const TRACE_LEN = 90;
+let sunEvent = 'alba';
+let gpsCoords = null;
+let scheduleActive = false;
+let scheduleMode = null; // 'interval' | 'sun' | null
+let scheduleTimer = null;
+let countdownTimer = null;
+
+// ---------- filtro scena intelligente ----------
+const GRID_COLS = 4, GRID_ROWS = 3;
+const ZONE_COUNT = GRID_COLS * GRID_ROWS;
+let zoneBaseline = new Array(ZONE_COUNT).fill(null);
+let prevDelta = 0;
+
+// ---------- WebUSB / web-gphoto2 ----------
+let Camera, camera;
+let cameraConnected = false;
+
+async function loadCameraLib() {
+  if (Camera) return;
+  log('ok', 'Carico il modulo fotocamera…');
+  const mod = await import('https://cdn.jsdelivr.net/npm/web-gphoto2@0.4.1/+esm');
+  Camera = mod.Camera;
+  camera = new Camera();
+}
+
+function setCameraStatus(ok, text) {
+  cameraConnected = ok;
+  statusDot.className = 'dot ' + (ok ? 'online' : 'offline');
+  statusText.textContent = text || (ok ? 'CONNESSA' : 'NON CONNESSA');
+  cameraStatusText.textContent = ok ? 'connessa' : 'non connessa';
+  cameraStatusText.style.color = ok ? 'var(--trace)' : 'var(--muted)';
+}
+setCameraStatus(false);
+
+cameraConnectBtn.onclick = async () => {
+  try {
+    await loadCameraLib();
+    await Camera.showPicker();
+    await camera.connect();
+    setCameraStatus(true);
+    log('ok', 'Fotocamera connessa');
+  } catch (e) {
+    setCameraStatus(false);
+    log('error', 'Connessione fallita: ' + e.message);
+  }
+};
+
+/** Esegue uno scatto (con eventuale raffica) direttamente via WebUSB. */
+async function fireShutter(burstCount = 1, burstIntervalMs = 0) {
+  if (!cameraConnected) return { ok: false, message: 'Fotocamera non connessa' };
+  burstCount = Math.max(1, burstCount);
+  try {
+    for (let i = 0; i < burstCount; i++) {
+      const t0 = performance.now();
+      await camera.captureImageAsFile();
+      const dt = Math.round(performance.now() - t0);
+      if (burstCount > 1) log('ok', `Scatto ${i + 1}/${burstCount} in ${dt} ms`);
+      else log('ok', `Scatto in ${dt} ms`);
+      if (i < burstCount - 1 && burstIntervalMs > 0) {
+        await new Promise(r => setTimeout(r, burstIntervalMs));
+      }
+    }
+    return { ok: true, message: 'Scatto riuscito' };
+  } catch (e) {
+    return { ok: false, message: 'Errore scatto: ' + e.message };
+  }
+}
+
+// ---------- statistiche (localStorage, niente server) ----------
+function loadStats() {
+  const today = new Date().toISOString().slice(0, 10);
+  let stats;
+  try {
+    stats = JSON.parse(localStorage.getItem('ft_stats')) || {};
+  } catch (e) { stats = {}; }
+  if (!stats.today_date) stats = { total_all_time: 0, today_date: today, today_count: 0, today_times: [] };
+  if (stats.today_date !== today) { stats.today_date = today; stats.today_count = 0; stats.today_times = []; }
+  return stats;
+}
+function saveStats(stats) { localStorage.setItem('ft_stats', JSON.stringify(stats)); }
+
+function recordFlashEvent() {
+  const stats = loadStats();
+  stats.today_count++;
+  stats.total_all_time = (stats.total_all_time || 0) + 1;
+  stats.today_times.push(new Date().toLocaleTimeString('it-IT', { hour12: false }));
+  if (stats.today_times.length > 300) stats.today_times.shift();
+  saveStats(stats);
+  refreshStats();
+}
+
+function refreshStats() {
+  const stats = loadStats();
+  statsToday.textContent = stats.today_count;
+  statsTotal.textContent = stats.total_all_time;
+  if (stats.today_times && stats.today_times.length) {
+    timesList.innerHTML = stats.today_times.slice().reverse().map(t => `<span class="chip">${t}</span>`).join('');
+  } else {
+    timesList.innerHTML = '<span class="log-empty">Nessun lampo rilevato oggi</span>';
+  }
+}
+
+// ---------- menu ad hamburger ----------
+const menuBtn = document.getElementById('menuBtn');
+const overlay = document.getElementById('overlay');
+const drawer = document.getElementById('drawer');
+const drawerItems = document.querySelectorAll('.drawer-item');
+const screens = document.querySelectorAll('.screen');
+const headerTitle = document.getElementById('headerTitle');
+const headerDot = document.getElementById('headerDot');
+
+const SCREEN_LABELS = { flash: 'Flash', interval: 'Intervallo', sun: 'Alba/Tramonto', stats: 'Statistiche', log: 'Registro eventi', camera: 'Fotocamera' };
+const SCREEN_DOT_COLOR = { flash: 'var(--live)', interval: 'var(--trace)', sun: 'var(--accent)', stats: 'var(--muted-2)', log: 'var(--muted-2)', camera: 'var(--muted-2)' };
+
+function openMenu() { overlay.classList.add('open'); drawer.classList.add('open'); }
+function closeMenu() { overlay.classList.remove('open'); drawer.classList.remove('open'); }
+menuBtn.onclick = openMenu;
+overlay.onclick = closeMenu;
+document.getElementById('drawerCloseBtn').onclick = closeMenu;
+
+function goToScreen(name) {
+  screens.forEach(s => s.classList.toggle('active', s.dataset.screen === name));
+  drawerItems.forEach(i => i.classList.toggle('active', i.dataset.screen === name));
+  modePills.forEach(p => p.classList.toggle('active', p.dataset.screen === name));
+  headerTitle.textContent = SCREEN_LABELS[name];
+  headerDot.style.background = SCREEN_DOT_COLOR[name];
+  if (['flash', 'interval', 'sun'].includes(name)) mode = name;
+
+  const isShootingMode = ['flash', 'interval', 'sun'].includes(name);
+  controlBar.style.display = isShootingMode ? 'block' : 'none';
+  controlBar.classList.toggle('on-viewfinder', name === 'flash');
+  controlBar.classList.toggle('docked', isShootingMode && name !== 'flash');
+  mainHeader.classList.toggle('overlay-header', name === 'flash');
+
+  if (name === 'stats') refreshStats();
+  updateShutterUI();
+  closeMenu();
+}
+drawerItems.forEach(item => { item.onclick = () => goToScreen(item.dataset.screen); });
+modePills.forEach(pill => { pill.onclick = () => goToScreen(pill.dataset.screen); });
+headerDot.style.background = SCREEN_DOT_COLOR.flash;
+
+// ---------- foglio impostazioni Flash ----------
+const sheet = document.getElementById('sheet');
+const sheetOverlay = document.getElementById('sheetOverlay');
+const gearBtn = document.getElementById('gearBtn');
+function openSheet() { sheet.classList.add('open'); sheetOverlay.classList.add('open'); }
+function closeSheet() { sheet.classList.remove('open'); sheetOverlay.classList.remove('open'); }
+gearBtn.onclick = openSheet;
+sheetOverlay.onclick = closeSheet;
+
+// ---------- persistenza locale impostazioni ----------
+thresholdEl.value = localStorage.getItem('ft_threshold') || 35;
+delayEl.value = localStorage.getItem('ft_delay') || 0;
+cooldownEl.value = localStorage.getItem('ft_cooldown') || 1200;
+burstCountEl.value = localStorage.getItem('ft_burst_count') || 1;
+burstIntervalEl.value = localStorage.getItem('ft_burst_interval') || 0;
+let sceneFilterOn = localStorage.getItem('ft_scene_on') === '1';
+let requireSudden = localStorage.getItem('ft_scene_sudden') !== '0';
+uniformityMinEl.value = localStorage.getItem('ft_uniformity_min') || 50;
+
+function applySceneUI() {
+  sceneToggle.textContent = sceneFilterOn ? 'On' : 'Off';
+  sceneControls.classList.toggle('hidden-panel', !sceneFilterOn);
+  suddenToggle.textContent = requireSudden ? 'Sì' : 'No';
+  uniformityMinVal.textContent = uniformityMinEl.value + '%';
+}
+applySceneUI();
+
+sceneToggle.onclick = () => { sceneFilterOn = !sceneFilterOn; localStorage.setItem('ft_scene_on', sceneFilterOn ? '1' : '0'); applySceneUI(); };
+suddenToggle.onclick = () => { requireSudden = !requireSudden; localStorage.setItem('ft_scene_sudden', requireSudden ? '1' : '0'); applySceneUI(); };
+uniformityMinEl.oninput = () => { uniformityMinVal.textContent = uniformityMinEl.value + '%'; localStorage.setItem('ft_uniformity_min', uniformityMinEl.value); };
+
+function syncLabels() {
+  thresholdVal.textContent = thresholdEl.value;
+  delayVal.textContent = delayEl.value + ' ms';
+  cooldownVal.textContent = (cooldownEl.value / 1000).toFixed(1) + ' s';
+  burstCountVal.textContent = burstCountEl.value;
+  burstIntervalVal.textContent = burstIntervalEl.value + ' ms';
+}
+syncLabels();
+
+thresholdEl.oninput = () => { syncLabels(); localStorage.setItem('ft_threshold', thresholdEl.value); };
+delayEl.oninput = () => { syncLabels(); localStorage.setItem('ft_delay', delayEl.value); };
+cooldownEl.oninput = () => { syncLabels(); localStorage.setItem('ft_cooldown', cooldownEl.value); };
+burstCountEl.oninput = () => { syncLabels(); localStorage.setItem('ft_burst_count', burstCountEl.value); };
+burstIntervalEl.oninput = () => { syncLabels(); localStorage.setItem('ft_burst_interval', burstIntervalEl.value); };
+
+function log(kind, text) {
+  const time = new Date().toLocaleTimeString('it-IT', { hour12: false }) + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
+  const row = document.createElement('div');
+  row.className = 'log-row ' + kind;
+  row.innerHTML = `<span class="t">${time}</span><span>${text}</span>`;
+  if (logEl.querySelector('.log-empty')) logEl.innerHTML = '';
+  logEl.prepend(row);
+  while (logEl.children.length > 30) logEl.removeChild(logEl.lastChild);
+}
+
+function resizeTrace() {
+  const rect = traceCanvas.getBoundingClientRect();
+  if (rect.width === 0) return;
+  traceCanvas.width = rect.width * devicePixelRatio;
+  traceCanvas.height = rect.height * devicePixelRatio;
+}
+
+async function startCamPreview() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+    analyzeCanvas.width = 160; analyzeCanvas.height = 120;
+    resizeTrace();
+    requestAnimationFrame(analyzeLoop);
+  } catch (e) {
+    log('error', 'Fotocamera del telefono non disponibile: ' + e.message);
+  }
+}
+window.addEventListener('resize', resizeTrace);
+
+function drawTrace() {
+  const w = traceCanvas.width, h = traceCanvas.height;
+  if (!w || !h) return;
+  tctx.clearRect(0, 0, w, h);
+  const threshold = parseFloat(thresholdEl.value);
+  const scaleMax = 60;
+  const thY = h - (threshold / scaleMax) * h;
+  tctx.strokeStyle = 'rgba(240,169,60,0.45)';
+  tctx.setLineDash([4 * devicePixelRatio, 4 * devicePixelRatio]);
+  tctx.lineWidth = 1 * devicePixelRatio;
+  tctx.beginPath(); tctx.moveTo(0, thY); tctx.lineTo(w, thY); tctx.stroke();
+  tctx.setLineDash([]);
+
+  if (traceBuffer.length < 2) return;
+  const stepX = w / (TRACE_LEN - 1);
+  tctx.strokeStyle = '#57D6C4';
+  tctx.lineWidth = 1.6 * devicePixelRatio;
+  tctx.beginPath();
+  traceBuffer.forEach((v, i) => {
+    const x = i * stepX;
+    const y = h - Math.min(1, v / scaleMax) * h;
+    i === 0 ? tctx.moveTo(x, y) : tctx.lineTo(x, y);
+  });
+  tctx.stroke();
+}
+
+function analyzeLoop() {
+  if (video.readyState >= 2) {
+    actx.drawImage(video, 0, 0, analyzeCanvas.width, analyzeCanvas.height);
+    const frame = actx.getImageData(0, 0, analyzeCanvas.width, analyzeCanvas.height).data;
+    const w = analyzeCanvas.width, h = analyzeCanvas.height;
+    const zoneW = w / GRID_COLS, zoneH = h / GRID_ROWS;
+    const zoneSums = new Array(ZONE_COUNT).fill(0);
+    const zoneCounts = new Array(ZONE_COUNT).fill(0);
+    let sum = 0, count = 0;
+    const step = 16;
+
+    for (let i = 0; i < frame.length; i += step) {
+      const pixelIndex = i / 4;
+      const x = pixelIndex % w;
+      const y = Math.floor(pixelIndex / w);
+      const lum = 0.2126 * frame[i] + 0.7152 * frame[i + 1] + 0.0722 * frame[i + 2];
+      sum += lum; count++;
+      const zx = Math.min(GRID_COLS - 1, Math.floor(x / zoneW));
+      const zy = Math.min(GRID_ROWS - 1, Math.floor(y / zoneH));
+      const zi = zy * GRID_COLS + zx;
+      zoneSums[zi] += lum; zoneCounts[zi]++;
+    }
+
+    const avg = sum / count / 255 * 100;
+    if (baseline === null) baseline = avg; else baseline = baseline * 0.92 + avg * 0.08;
+    const delta = Math.max(0, avg - baseline);
+    luxValue.textContent = delta.toFixed(1);
+
+    let activeZones = 0;
+    for (let zi = 0; zi < ZONE_COUNT; zi++) {
+      const zAvg = zoneCounts[zi] ? (zoneSums[zi] / zoneCounts[zi] / 255 * 100) : avg;
+      if (zoneBaseline[zi] === null) zoneBaseline[zi] = zAvg;
+      else zoneBaseline[zi] = zoneBaseline[zi] * 0.92 + zAvg * 0.08;
+      const zDelta = Math.max(0, zAvg - zoneBaseline[zi]);
+      if (zDelta >= delta * 0.5) activeZones++;
+    }
+    const uniformity = activeZones / ZONE_COUNT;
+    if (mode === 'flash') uniformityValue.textContent = delta > 1 ? Math.round(uniformity * 100) + '%' : '—';
+
+    traceBuffer.push(delta);
+    if (traceBuffer.length > TRACE_LEN) traceBuffer.shift();
+    if (document.getElementById('screen-flash').classList.contains('active')) drawTrace();
+
+    const threshold = parseFloat(thresholdEl.value);
+    const now = performance.now();
+    const cooldown = parseFloat(cooldownEl.value);
+    const suddenRise = prevDelta < threshold * 0.3;
+
+    const passesBasic = delta >= threshold;
+    const passesScene = !sceneFilterOn || (uniformity >= (parseFloat(uniformityMinEl.value) / 100) && (!requireSudden || suddenRise));
+
+    if (passesBasic && now - lastTrigger > cooldown) {
+      flashFlag.classList.add('show');
+      setTimeout(() => flashFlag.classList.remove('show'), 260);
+      if (armed) {
+        if (passesScene) { lastTrigger = now; onFlashDetected(); }
+        else { lastTrigger = now; log('ok', `Scartato dal filtro scena (unif ${Math.round(uniformity*100)}%)`); }
+      }
+    }
+    prevDelta = delta;
+  }
+  requestAnimationFrame(analyzeLoop);
+}
+
+async function onFlashDetected() {
+  if (!cameraConnected) { log('error', 'Fotocamera non connessa'); return; }
+  log('trigger', 'Lampo rilevato → scatto');
+  const delayMs = parseInt(delayEl.value, 10);
+  if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
+  const result = await fireShutter(parseInt(burstCountEl.value, 10), parseInt(burstIntervalEl.value, 10));
+  log(result.ok ? 'ok' : 'error', result.message);
+  if (result.ok) recordFlashEvent();
+}
+
+// ---------- badge nel drawer ----------
+function updateBadges() {
+  const bF = document.getElementById('badgeFlash');
+  bF.textContent = armed ? 'ARMATO' : '';
+  bF.className = 'badge' + (armed ? ' on-flash' : '');
+
+  const bI = document.getElementById('badgeInterval');
+  const iActive = scheduleActive && scheduleMode === 'interval';
+  bI.textContent = iActive ? 'ATTIVO' : '';
+  bI.className = 'badge' + (iActive ? ' on-interval' : '');
+
+  const bS = document.getElementById('badgeSun');
+  const sActive = scheduleActive && scheduleMode === 'sun';
+  bS.textContent = sActive ? 'ATTIVO' : '';
+  bS.className = 'badge' + (sActive ? ' on-sun' : '');
+}
+
+// ---------- pulsante di scatto unico ----------
+function updateShutterUI() {
+  if (mode === 'flash') {
+    shutterBtn.textContent = armed ? 'STOP' : 'ARMA';
+    shutterBtn.classList.toggle('armed', armed);
+    hintEl.textContent = armed ? 'Armato — scatta al prossimo lampo rilevato' : 'Punta il telefono verso il flash, poi attiva';
+  } else if (mode === 'interval') {
+    const active = scheduleActive && scheduleMode === 'interval';
+    shutterBtn.textContent = active ? 'STOP' : 'AVVIA';
+    shutterBtn.classList.toggle('armed', active);
+    hintEl.textContent = active ? '' : 'Scatti a intervalli regolari, calcolati sul telefono';
+  } else if (mode === 'sun') {
+    const active = scheduleActive && scheduleMode === 'sun';
+    shutterBtn.textContent = active ? 'STOP' : 'AVVIA';
+    shutterBtn.classList.toggle('armed', active);
+    hintEl.textContent = active ? '' : "Serve la posizione GPS prima di programmare";
+  }
+  updateBadges();
+}
+
+shutterBtn.onclick = () => {
+  if (mode === 'flash') {
+    if (!cameraConnected) { log('error', 'Connetti prima la fotocamera (menu → Fotocamera)'); return; }
+    armed = !armed;
+    log(armed ? 'trigger' : 'ok', armed ? 'Sistema armato' : 'Sistema disattivato');
+    updateShutterUI();
+  } else if (mode === 'interval') {
+    if (scheduleActive && scheduleMode === 'interval') stopSchedule(); else startInterval();
+  } else if (mode === 'sun') {
+    if (scheduleActive && scheduleMode === 'sun') stopSchedule(); else startSun();
+  }
+};
+
+// ---------- modalità Intervallo (loop lato client, nessun server) ----------
+intervalSecEl.oninput = () => { intervalVal.textContent = intervalSecEl.value + ' s'; };
+
+function startInterval() {
+  if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
+  const intervalS = parseFloat(intervalSecEl.value);
+  const count = parseInt(intervalCountEl.value, 10) || 0;
+  const durationMs = (parseInt(intervalDurationEl.value, 10) || 0) * 60000;
+  const startedAt = performance.now();
+  let shots = 0;
+
+  scheduleActive = true; scheduleMode = 'interval';
+  updateShutterUI();
+  log('trigger', `Intervallo avviato: ogni ${intervalS}s`);
+
+  async function tick() {
+    if (!scheduleActive) return;
+    const result = await fireShutter(1, 0);
+    if (result.ok) { shots++; recordFlashEventSilent(); }
+    log(result.ok ? 'ok' : 'error', result.message);
+    intervalStatus.innerHTML = `Scatti effettuati: ${shots}`;
+
+    if (count && shots >= count) { stopSchedule(); return; }
+    if (durationMs && (performance.now() - startedAt) >= durationMs) { stopSchedule(); return; }
+    if (scheduleActive) scheduleTimer = setTimeout(tick, intervalS * 1000);
+  }
+  tick();
+}
+
+// L'intervallometro non è un "lampo rilevato", ma va comunque contato tra
+// gli scatti totali senza mischiarsi ai tempi specifici del trigger flash.
+function recordFlashEventSilent() {
+  const stats = loadStats();
+  stats.total_all_time = (stats.total_all_time || 0) + 1;
+  saveStats(stats);
+  if (document.querySelector('.screen[data-screen="stats"]').classList.contains('active')) refreshStats();
+}
+
+// ---------- modalità Alba/Tramonto (calcolo lato client, offline) ----------
+sunAlbaBtn.onclick = () => { sunEvent = 'alba'; sunAlbaBtn.classList.add('active'); sunTramontoBtn.classList.remove('active'); };
+sunTramontoBtn.onclick = () => { sunEvent = 'tramonto'; sunTramontoBtn.classList.add('active'); sunAlbaBtn.classList.remove('active'); };
+sunOffsetEl.oninput = () => {
+  const v = parseInt(sunOffsetEl.value, 10);
+  offsetVal.textContent = (v === 0 ? '0 min (esatto)' : (v > 0 ? `+${v} min (dopo)` : `${v} min (prima)`));
+  offsetVal.className = 'offset-val ' + (v < 0 ? 'neg' : (v > 0 ? 'pos' : ''));
+};
+
+gpsBtn.onclick = () => {
+  if (!navigator.geolocation) { log('error', 'GPS non disponibile su questo browser'); return; }
+  sunStatus.textContent = 'Rilevamento posizione in corso…';
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      gpsCoords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      sunStatus.innerHTML = `Posizione rilevata<div class="big">${gpsCoords.lat.toFixed(4)}, ${gpsCoords.lon.toFixed(4)}</div>`;
+    },
+    err => { sunStatus.textContent = 'Impossibile rilevare la posizione: ' + err.message; },
+    { enableHighAccuracy: true, timeout: 20000 }
+  );
+};
+
+/** Alba/tramonto per una data e posizione — formula standard
+ * "Sunrise/Sunset Algorithm" (Almanac for Computers, NOAA), di dominio
+ * pubblico. Calcolo interamente offline, nessuna richiesta di rete. */
+function calcSunTime(date, lat, lon, isSunrise) {
+  const rad = Math.PI / 180;
+  const startOfYear = new Date(Date.UTC(date.getUTCFullYear(), 0, 0));
+  const dayOfYear = Math.floor((date - startOfYear) / 86400000);
+  const lngHour = lon / 15;
+  const t = isSunrise ? dayOfYear + ((6 - lngHour) / 24) : dayOfYear + ((18 - lngHour) / 24);
+
+  const M = (0.9856 * t) - 3.289;
+  let L = M + (1.916 * Math.sin(M * rad)) + (0.020 * Math.sin(2 * M * rad)) + 282.634;
+  L = ((L % 360) + 360) % 360;
+
+  let RA = (1 / rad) * Math.atan(0.91764 * Math.tan(L * rad));
+  RA = ((RA % 360) + 360) % 360;
+  const Lquadrant = Math.floor(L / 90) * 90;
+  const RAquadrant = Math.floor(RA / 90) * 90;
+  RA = (RA + (Lquadrant - RAquadrant)) / 15;
+
+  const sinDec = 0.39782 * Math.sin(L * rad);
+  const cosDec = Math.cos(Math.asin(sinDec));
+  const zenith = 90.833;
+  const cosH = (Math.cos(zenith * rad) - (sinDec * Math.sin(lat * rad))) / (cosDec * Math.cos(lat * rad));
+  if (cosH > 1 || cosH < -1) return null; // sole sempre sotto/sopra l'orizzonte in quella data/posizione
+
+  let H = isSunrise ? 360 - (1 / rad) * Math.acos(cosH) : (1 / rad) * Math.acos(cosH);
+  H = H / 15;
+
+  const T = H + RA - (0.06571 * t) - 6.622;
+  let UT = ((T - lngHour) % 24 + 24) % 24;
+
+  const result = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  result.setUTCMilliseconds(UT * 3600000);
+  return result;
+}
+
+function computeSunTarget(lat, lon, event, offsetMin) {
+  const now = new Date();
+  let target = calcSunTime(now, lat, lon, event === 'alba');
+  if (!target || target < now) {
+    const tomorrow = new Date(now);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    target = calcSunTime(tomorrow, lat, lon, event === 'alba');
+  }
+  if (!target) return null;
+  return new Date(target.getTime() + offsetMin * 60000);
+}
+
+function startSun() {
+  if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
+  if (!gpsCoords) { log('error', 'Rileva prima la posizione GPS'); return; }
+  const target = computeSunTarget(gpsCoords.lat, gpsCoords.lon, sunEvent, parseInt(sunOffsetEl.value, 10));
+  if (!target) { log('error', "Impossibile calcolare l'orario per questa posizione"); return; }
+
+  scheduleActive = true; scheduleMode = 'sun';
+  updateShutterUI();
+  log('trigger', `Programmato per ${sunEvent} alle ${target.toLocaleTimeString('it-IT', { hour12: false })}`);
+
+  countdownTimer = setInterval(() => {
+    const remain = Math.max(0, Math.round((target - new Date()) / 1000));
+    const mm = String(Math.floor(remain / 60)).padStart(2, '0');
+    const ss = String(remain % 60).padStart(2, '0');
+    sunStatus.innerHTML = `Scatto alle ${target.toLocaleTimeString('it-IT', { hour12: false })} (tra ${mm}:${ss})`;
+  }, 1000);
+
+  const waitMs = Math.max(0, target - new Date());
+  scheduleTimer = setTimeout(async () => {
+    const result = await fireShutter(1, 0);
+    log(result.ok ? 'ok' : 'error', result.message);
+    if (result.ok) recordFlashEventSilent();
+    stopSchedule();
+  }, waitMs);
+}
+
+function stopSchedule() {
+  scheduleActive = false; scheduleMode = null;
+  clearTimeout(scheduleTimer);
+  clearInterval(countdownTimer);
+  intervalStatus.textContent = 'In attesa di avvio';
+  sunStatus.textContent = gpsCoords ? 'Programmazione annullata' : 'Posizione non ancora rilevata';
+  updateShutterUI();
+}
+
+startCamPreview();
+refreshStats();
+updateShutterUI();
+</script>
+</body>
+</html>

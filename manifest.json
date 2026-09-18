@@ -1,0 +1,16 @@
+{
+  "name": "Trigger — A6100",
+  "short_name": "Trigger",
+  "description": "Trigger a lampo di luce, intervallometro e programmazione alba/tramonto per Sony A6100",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0E0F13",
+  "theme_color": "#0E0F13",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
