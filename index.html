@@ -560,6 +560,19 @@ async function loadCameraLib() {
   camera = new Camera();
 }
 
+/** Evita che una connessione bloccata a metà lasci l'interfaccia ferma
+ * in silenzio: dopo il tempo indicato, l'attesa fallisce con un errore
+ * visibile invece di restare appesa indefinitamente. */
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(
+      () => reject(new Error(`${label}: nessuna risposta dopo ${Math.round(ms / 1000)}s — riavvia la fotocamera e riprova`)),
+      ms
+    ))
+  ]);
+}
+
 function setCameraStatus(ok, text) {
   cameraConnected = ok;
   statusDot.className = 'dot ' + (ok ? 'online' : 'offline');
@@ -570,17 +583,46 @@ function setCameraStatus(ok, text) {
 setCameraStatus(false);
 
 cameraConnectBtn.onclick = async () => {
+  cameraConnectBtn.disabled = true;
+  setCameraStatus(false, 'CONNESSIONE…');
   try {
     await loadCameraLib();
     await Camera.showPicker();
-    await camera.connect();
+    log('ok', 'Fotocamera selezionata, negoziazione in corso…');
+    await withTimeout(camera.connect(), 15000, 'Connessione fotocamera');
     setCameraStatus(true);
     log('ok', 'Fotocamera connessa');
   } catch (e) {
     setCameraStatus(false);
     log('error', 'Connessione fallita: ' + e.message);
+  } finally {
+    cameraConnectBtn.disabled = false;
   }
 };
+
+/**
+ * Collegamento diretto: se il telefono ha già autorizzato questa
+ * fotocamera in passato (WebUSB ricorda il permesso concesso una volta),
+ * la connessione riparte da sola all'apertura della pagina, senza dover
+ * ripassare dal pulsante "Connetti" ogni volta. Se non trova nulla di
+ * già autorizzato, non succede nulla — resta il pulsante manuale.
+ */
+async function tryAutoConnect() {
+  if (!('usb' in navigator)) return;
+  try {
+    const already = await navigator.usb.getDevices();
+    if (!already.length) return; // nessun permesso pregresso: niente da fare in automatico
+    await loadCameraLib();
+    setCameraStatus(false, 'CONNESSIONE…');
+    log('ok', 'Fotocamera già autorizzata, riconnessione automatica…');
+    await withTimeout(camera.connect(), 15000, 'Riconnessione automatica');
+    setCameraStatus(true);
+    log('ok', 'Fotocamera connessa automaticamente');
+  } catch (e) {
+    setCameraStatus(false);
+    log('error', 'Riconnessione automatica fallita: ' + e.message + ' — usa "Connetti" manualmente');
+  }
+}
 
 // ---------- impostazioni fotocamera (lettura/scrittura remota via WebUSB) ----------
 const configPanel = document.getElementById('configPanel');
@@ -1152,6 +1194,7 @@ function stopSchedule() {
 }
 
 startCamPreview();
+tryAutoConnect();
 refreshStats();
 updateShutterUI();
 </script>
