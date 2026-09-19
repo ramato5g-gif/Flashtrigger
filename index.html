@@ -378,6 +378,9 @@
   <button class="drawer-item" data-screen="stats">Statistiche</button>
   <button class="drawer-item" data-screen="log">Registro eventi</button>
 
+  <div class="drawer-section">Strumenti</div>
+  <button class="drawer-item" data-screen="scenepresets">Preset scena</button>
+
   <div class="drawer-spacer"></div>
 </nav>
 
@@ -476,33 +479,6 @@
       <span class="name">Seleziona e connetti via USB</span>
       <button class="btn-ghost" id="cameraConnectBtn">Connetti</button>
     </div>
-  </div>
-
-  <div class="eyebrow">Preset scena</div>
-  <div class="panel">
-    <div class="ctrl">
-      <div class="ctrl-head"><span class="name">Obiettivo / apertura disponibile</span></div>
-      <select id="sceneLens" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);width:100%;">
-        <option value="2">Samyang 12mm F2.0</option>
-        <option value="3.5">Sony 18-135mm — f/3.5 (grandangolo)</option>
-        <option value="4.5">Sony 18-135mm — f/4.5 (medio)</option>
-        <option value="5.6">Sony 18-135mm — f/5.6 (tele)</option>
-        <option value="8">f/8</option>
-        <option value="11">f/11</option>
-        <option value="16">f/16</option>
-      </select>
-    </div>
-    <div class="field-row" style="flex-wrap:wrap; gap:8px;">
-      <button class="btn-ghost" id="scenePaesaggioBtn" style="flex:1 1 45%;">🏞️ Paesaggio</button>
-      <button class="btn-ghost" id="sceneRitrattoBtn" style="flex:1 1 45%;">🙂 Ritratto</button>
-      <button class="btn-ghost" id="sceneSportBtn" style="flex:1 1 45%;">🏃 Sport</button>
-      <button class="btn-ghost" id="sceneNotteBtn" style="flex:1 1 45%;">🌙 Notte</button>
-    </div>
-    <p class="log-empty" id="sceneHint" style="padding:10px 0 4px; text-align:left;">
-      Se hai calibrato l'esposimetro più sotto, i preset calcolano il
-      tempo di posa sulla luce reale rilevata in questo momento — altrimenti
-      usano un valore di base indicativo, da affinare a mano.
-    </p>
   </div>
 
   <div class="eyebrow">Griglia di composizione</div>
@@ -906,6 +882,51 @@
 
   <div class="screen scroll-pad" data-screen="log">
     <div class="log" id="log" style="margin-top:64px;"></div>
+  </div>
+
+  <div class="screen scroll-pad" data-screen="scenepresets">
+    <div class="panel" style="margin-top:64px;">
+      <div class="ctrl">
+        <div class="ctrl-head"><span class="name">Apertura</span></div>
+        <select id="sceneLens" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);width:100%;">
+          <option value="1.4">f/1.4</option>
+          <option value="1.8">f/1.8</option>
+          <option value="2" selected>f/2</option>
+          <option value="2.8">f/2.8</option>
+          <option value="3.5">f/3.5</option>
+          <option value="4">f/4</option>
+          <option value="4.5">f/4.5</option>
+          <option value="5">f/5</option>
+          <option value="5.6">f/5.6</option>
+          <option value="6.3">f/6.3</option>
+          <option value="7.1">f/7.1</option>
+          <option value="8">f/8</option>
+          <option value="9">f/9</option>
+          <option value="10">f/10</option>
+          <option value="11">f/11</option>
+          <option value="13">f/13</option>
+          <option value="14">f/14</option>
+          <option value="16">f/16</option>
+          <option value="18">f/18</option>
+          <option value="20">f/20</option>
+          <option value="22">f/22</option>
+        </select>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="field-row" style="flex-wrap:wrap; gap:8px;">
+        <button class="btn-ghost" id="scenePaesaggioBtn" style="flex:1 1 45%;">🏞️ Paesaggio</button>
+        <button class="btn-ghost" id="sceneRitrattoBtn" style="flex:1 1 45%;">🙂 Ritratto</button>
+        <button class="btn-ghost" id="sceneSportBtn" style="flex:1 1 45%;">🏃 Sport</button>
+        <button class="btn-ghost" id="sceneNotteBtn" style="flex:1 1 45%;">🌙 Notte</button>
+      </div>
+      <p class="log-empty" id="sceneHint" style="padding:10px 0 4px; text-align:left;">
+        Se hai calibrato l'esposimetro (menu Fotocamera), i preset
+        calcolano il tempo di posa sulla luce reale rilevata in questo
+        momento — altrimenti usano un valore di base indicativo, da
+        affinare a mano. Serve la fotocamera connessa per applicarli.
+      </p>
+    </div>
   </div>
 
   </div>
@@ -1592,8 +1613,8 @@ const screens = document.querySelectorAll('.screen');
 const headerTitle = document.getElementById('headerTitle');
 const headerDot = document.getElementById('headerDot');
 
-const SCREEN_LABELS = { flash: 'Flash', interval: 'Intervallo', sun: 'Alba/Tramonto', motion: 'Animali', stats: 'Statistiche', log: 'Registro eventi', camera: 'Fotocamera' };
-const SCREEN_DOT_COLOR = { flash: 'var(--live)', interval: 'var(--trace)', sun: 'var(--accent)', motion: 'var(--wild)', stats: 'var(--muted-2)', log: 'var(--muted-2)', camera: 'var(--accent)' };
+const SCREEN_LABELS = { flash: 'Flash', interval: 'Intervallo', sun: 'Alba/Tramonto', motion: 'Animali', stats: 'Statistiche', log: 'Registro eventi', camera: 'Fotocamera', scenepresets: 'Preset scena' };
+const SCREEN_DOT_COLOR = { flash: 'var(--live)', interval: 'var(--trace)', sun: 'var(--accent)', motion: 'var(--wild)', stats: 'var(--muted-2)', log: 'var(--muted-2)', camera: 'var(--accent)', scenepresets: 'var(--muted-2)' };
 
 function openMenu() { overlay.classList.add('open'); drawer.classList.add('open'); }
 function closeMenu() { overlay.classList.remove('open'); drawer.classList.remove('open'); }
