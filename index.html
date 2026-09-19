@@ -150,10 +150,8 @@
   }
   .icon-btn-vf.active { background: rgba(240,169,60,0.28); color: var(--accent); border-color: var(--accent); }
 
-  .grid-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
-  .grid-overlay .grid-line { position: absolute; background: rgba(255,255,255,0.32); }
-  .grid-overlay .grid-line.v { top: 0; bottom: 0; width: 1px; }
-  .grid-overlay .grid-line.h { left: 0; right: 0; height: 1px; }
+  .grid-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }
+  .grid-overlay line { stroke: rgba(255,255,255,0.34); stroke-width: 0.3; vector-effect: non-scaling-stroke; }
 
   .level-overlay {
     position: absolute; inset: 0; pointer-events: none; z-index: 2;
@@ -480,6 +478,18 @@
     </div>
   </div>
 
+  <div class="eyebrow">Griglia di composizione</div>
+  <div class="panel">
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Tipo</span></div>
+      <select id="gridTypeSelect" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);width:100%;">
+        <option value="thirds">Regola dei terzi</option>
+        <option value="diagonal">Linee oblique (diagonali)</option>
+        <option value="golden">Sezione aurea</option>
+      </select>
+    </div>
+  </div>
+
   <div class="eyebrow">Sensore del telefono (rilevamento)</div>
   <div class="panel">
     <div class="ctrl">
@@ -678,12 +688,7 @@
       <img id="cameraLiveViewImg" class="hidden-panel" style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:1;">
       <div class="readout hidden-panel" id="liveViewFpsReadout" style="top:auto; bottom: max(120px, calc(env(safe-area-inset-bottom) + 100px));"><span class="lbl">live view</span><span id="liveViewFpsValue">—</span></div>
 
-      <div class="grid-overlay hidden-panel" id="gridOverlay">
-        <div class="grid-line v" style="left:33.333%"></div>
-        <div class="grid-line v" style="left:66.666%"></div>
-        <div class="grid-line h" style="top:33.333%"></div>
-        <div class="grid-line h" style="top:66.666%"></div>
-      </div>
+      <svg class="grid-overlay hidden-panel" id="gridOverlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
 
       <div class="level-overlay hidden-panel" id="levelOverlay">
         <div class="level-line" id="levelLine"></div>
@@ -1476,6 +1481,9 @@ liveViewToggleBtn.onclick = () => {
 async function startLiveViewLoop() {
   if (liveViewLoopActive) return;
   liveViewLoopActive = true;
+  let consecutiveFailures = 0;
+  const MAX_CONSECUTIVE_FAILURES = 5;
+
   while (liveViewOn && cameraConnected) {
     try {
       const blob = await camera.capturePreviewAsBlob();
@@ -1483,6 +1491,7 @@ async function startLiveViewLoop() {
       const prevUrl = liveViewImg.src;
       liveViewImg.src = url;
       if (prevUrl && prevUrl.startsWith('blob:')) URL.revokeObjectURL(prevUrl);
+      consecutiveFailures = 0;
 
       const now = performance.now();
       if (liveViewLastFrameTime != null) {
@@ -1492,6 +1501,15 @@ async function startLiveViewLoop() {
       }
       liveViewLastFrameTime = now;
     } catch (e) {
+      consecutiveFailures++;
+      // un singolo fotogramma perso (es. durante la rotazione dello schermo,
+      // che può interrompere per un istante il trasferimento USB) non deve
+      // fermare tutto: si ritenta finché non si accumulano troppi fallimenti
+      // di fila, segno di un problema vero.
+      if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
+        await new Promise(r => setTimeout(r, 200));
+        continue;
+      }
       log('error', 'Live view non disponibile: ' + e.message);
       liveViewOn = false;
       liveViewImg.classList.add('hidden-panel');
@@ -1606,7 +1624,32 @@ motionSheetOverlay.onclick = closeMotionSheet;
 // ---------- griglia di composizione ----------
 const gridToggleBtn = document.getElementById('gridToggleBtn');
 const gridOverlay = document.getElementById('gridOverlay');
+const gridTypeSelect = document.getElementById('gridTypeSelect');
 let gridOn = localStorage.getItem('ft_grid_on') === '1';
+let gridType = localStorage.getItem('ft_grid_type') || 'thirds';
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svgLine(x1, y1, x2, y2) {
+  const el = document.createElementNS(SVG_NS, 'line');
+  el.setAttribute('x1', x1); el.setAttribute('y1', y1);
+  el.setAttribute('x2', x2); el.setAttribute('y2', y2);
+  return el;
+}
+
+function renderGridLines() {
+  gridOverlay.innerHTML = '';
+  if (gridType === 'thirds') {
+    [33.333, 66.666].forEach(p => gridOverlay.appendChild(svgLine(p, 0, p, 100)));
+    [33.333, 66.666].forEach(p => gridOverlay.appendChild(svgLine(0, p, 100, p)));
+  } else if (gridType === 'golden') {
+    [38.2, 61.8].forEach(p => gridOverlay.appendChild(svgLine(p, 0, p, 100)));
+    [38.2, 61.8].forEach(p => gridOverlay.appendChild(svgLine(0, p, 100, p)));
+  } else if (gridType === 'diagonal') {
+    gridOverlay.appendChild(svgLine(0, 0, 100, 100));
+    gridOverlay.appendChild(svgLine(100, 0, 0, 100));
+  }
+}
+renderGridLines();
 
 function applyGridUI() {
   gridOverlay.classList.toggle('hidden-panel', !gridOn);
@@ -1617,6 +1660,13 @@ gridToggleBtn.onclick = () => {
   gridOn = !gridOn;
   localStorage.setItem('ft_grid_on', gridOn ? '1' : '0');
   applyGridUI();
+};
+
+gridTypeSelect.value = gridType;
+gridTypeSelect.onchange = () => {
+  gridType = gridTypeSelect.value;
+  localStorage.setItem('ft_grid_type', gridType);
+  renderGridLines();
 };
 
 // ---------- livella ----------
