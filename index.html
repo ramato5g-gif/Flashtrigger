@@ -700,6 +700,7 @@
 
       <canvas class="overlay-canvas hidden-panel" id="zebraCanvas"></canvas>
       <canvas class="overlay-canvas hidden-panel" id="peakingCanvas"></canvas>
+      <canvas class="overlay-canvas hidden-panel" id="faceCanvas"></canvas>
 
       <div class="readout"><span class="lbl">Luce</span><span id="meterBrightness">—</span><span class="lbl" style="margin-left:8px;">posa</span><span id="meterShutterOverlay">—</span></div>
 
@@ -708,6 +709,7 @@
         <button class="icon-btn-vf" id="levelToggleBtn">◐</button>
         <button class="icon-btn-vf" id="zebraToggleBtn">▤</button>
         <button class="icon-btn-vf" id="peakingToggleBtn">◈</button>
+        <button class="icon-btn-vf" id="faceToggleBtn">👤</button>
         <button class="icon-btn-vf" id="liveViewToggleBtn">📷</button>
         <button class="icon-btn-vf" id="cameraGearBtn">⚙</button>
       </div>
@@ -1046,6 +1048,22 @@ let prevDelta = 0;
 let Camera, camera;
 let cameraConnected = false;
 
+/** La fotocamera parla PTP su un'unica connessione USB: due comandi che
+ * si sovrappongono (es. un fotogramma di live view ancora in transito
+ * mentre arriva un comando di scatto) possono mandarla in blocco. Questo
+ * blocco garantisce che un solo comando alla volta raggiunga la fotocamera,
+ * qualunque sia il punto dell'app che lo genera. */
+let cameraBusy = false;
+async function withCameraLock(fn) {
+  while (cameraBusy) await new Promise(r => setTimeout(r, 20));
+  cameraBusy = true;
+  try {
+    return await fn();
+  } finally {
+    cameraBusy = false;
+  }
+}
+
 async function loadCameraLib() {
   if (Camera) return;
   log('ok', 'Carico il modulo fotocamera…');
@@ -1133,7 +1151,7 @@ async function nudgeFocus(direction) {
   const step = focusStepSelect.value; // 1=piccolo 2=medio 3=grande, convenzione comune gphoto2
   const value = direction === 'near' ? `Near ${step}` : `Far ${step}`;
   try {
-    await camera.setConfigValue('manualfocusdrive', value);
+    await withCameraLock(() => camera.setConfigValue('manualfocusdrive', value));
     log('ok', `Fuoco spostato: ${value}`);
     focusHint.textContent = 'Il comando è stato accettato dalla fotocamera.';
   } catch (e) {
@@ -1148,7 +1166,7 @@ configRefreshBtn.onclick = async () => {
   if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
   configPanel.innerHTML = '<p class="log-empty" style="padding:20px 0;">Lettura in corso…</p>';
   try {
-    const config = await camera.getConfig();
+    const config = await withCameraLock(() => camera.getConfig());
     log('ok', 'Configurazione letta dalla fotocamera');
     configPanel.innerHTML = '';
     renderConfigNode(config, configPanel, '');
@@ -1230,7 +1248,7 @@ function renderConfigField(configName, label, field, container) {
 
   input.onchange = async () => {
     try {
-      await camera.setConfigValue(configName, input.value);
+      await withCameraLock(() => camera.setConfigValue(configName, input.value));
       log('ok', `${label} impostato a "${input.value}"`);
     } catch (e) {
       log('error', `Errore impostando ${label}: ` + e.message);
@@ -1327,9 +1345,9 @@ starApplyBtn.onclick = async () => {
   const iso = parseInt(starIsoEl.value, 10);
   const aperture = parseFloat(starApertureEl.value);
   try {
-    await camera.setConfigValue('iso', String(iso));
-    await camera.setConfigValue('aperture', String(aperture));
-    await camera.setConfigValue('shutterspeed', starMaxSec.toFixed(1));
+    await withCameraLock(() => camera.setConfigValue('iso', String(iso)));
+    await withCameraLock(() => camera.setConfigValue('aperture', String(aperture)));
+    await withCameraLock(() => camera.setConfigValue('shutterspeed', starMaxSec.toFixed(1)));
     log('ok', `Applicato alla fotocamera: f/${aperture}, ISO ${iso}, ${starMaxSec.toFixed(1)}s`);
   } catch (e) {
     log('error', 'Errore applicando le impostazioni: ' + e.message + ' — imposta a mano da "Impostazioni manuali"');
@@ -1403,9 +1421,9 @@ meterApplyBtn.onclick = async () => {
   const apertureChosen = parseFloat(meterLensEl.value);
   const shutterLabel = shutterSec < 1 ? `1/${Math.round(1 / shutterSec)}` : shutterSec.toFixed(1);
   try {
-    await camera.setConfigValue('iso', String(isoChosen));
-    await camera.setConfigValue('aperture', String(apertureChosen));
-    await camera.setConfigValue('shutterspeed', shutterLabel);
+    await withCameraLock(() => camera.setConfigValue('iso', String(isoChosen)));
+    await withCameraLock(() => camera.setConfigValue('aperture', String(apertureChosen)));
+    await withCameraLock(() => camera.setConfigValue('shutterspeed', shutterLabel));
     log('ok', `Applicato alla fotocamera: f/${apertureChosen}, ISO ${isoChosen}, ${shutterLabel}s`);
   } catch (e) {
     log('error', 'Errore applicando le impostazioni: ' + e.message + ' — se i nomi campo non coincidono, imposta a mano da "Impostazioni manuali" qui sotto (l\'apertura potrebbe non essere impostabile via USB su tutti gli obiettivi — se fallisce, regolala a mano dalla fotocamera)');
@@ -1484,7 +1502,7 @@ async function fireShutter(burstCount = 1, burstIntervalMs = 0) {
   try {
     for (let i = 0; i < burstCount; i++) {
       const t0 = performance.now();
-      await camera.captureImageAsFile();
+      await withCameraLock(() => camera.captureImageAsFile());
       const dt = Math.round(performance.now() - t0);
       if (burstCount > 1) log('ok', `Scatto ${i + 1}/${burstCount} in ${dt} ms`);
       else log('ok', `Scatto in ${dt} ms`);
@@ -1534,7 +1552,7 @@ async function startLiveViewLoop() {
 
   while (liveViewOn && cameraConnected) {
     try {
-      const blob = await camera.capturePreviewAsBlob();
+      const blob = await withCameraLock(() => camera.capturePreviewAsBlob());
       const url = URL.createObjectURL(blob);
       const prevUrl = liveViewImg.src;
       liveViewImg.src = url;
@@ -1688,9 +1706,9 @@ async function applyScenePreset(name, iso, fallbackShutterLabel) {
   }
 
   try {
-    await camera.setConfigValue('iso', String(iso));
-    await camera.setConfigValue('aperture', String(aperture));
-    await camera.setConfigValue('shutterspeed', shutterLabel);
+    await withCameraLock(() => camera.setConfigValue('iso', String(iso)));
+    await withCameraLock(() => camera.setConfigValue('aperture', String(aperture)));
+    await withCameraLock(() => camera.setConfigValue('shutterspeed', shutterLabel));
     log('ok', `Preset ${name}: f/${aperture}, ISO ${iso}, ${shutterLabel} (${source})`);
     sceneHint.textContent = `Applicato "${name}" usando ${source}.` + (source === 'valore di base' ? ' Calibra l\'esposimetro più sotto per usare la luce reale.' : '');
   } catch (e) {
@@ -1918,6 +1936,7 @@ function updatePeaking() {
 function overlayResizeAll() {
   resizeOverlayCanvas(zebraCanvas);
   resizeOverlayCanvas(peakingCanvas);
+  resizeOverlayCanvas(faceCanvas);
 }
 window.addEventListener('resize', overlayResizeAll);
 
@@ -1927,6 +1946,140 @@ setInterval(() => {
   if (zebraOn) updateZebra();
   if (peakingOn) updatePeaking();
 }, 150);
+
+// --------------------------------------------------------------------
+// RILEVAMENTO E TRACCIAMENTO VOLTI — MediaPipe Face Detector (il modello
+// attuale di Google, mantenuto attivamente), caricato solo al primo
+// utilizzo. Sopra il rilevamento grezzo (per fotogramma) aggiungiamo un
+// tracciamento vero: ogni volto riceve un ID che resta lo stesso da un
+// fotogramma all'altro (abbinamento per sovrapposizione dei riquadri —
+// tecnica IoU), così un volto che si muove nell'inquadratura mantiene
+// la sua etichetta invece di venire ridisegnato come "nuovo" ogni volta.
+// --------------------------------------------------------------------
+const faceToggleBtn = document.getElementById('faceToggleBtn');
+const faceCanvas = document.getElementById('faceCanvas');
+const faceCtx = faceCanvas.getContext('2d');
+let faceOn = false;
+let faceDetector = null;
+let faceLoopActive = false;
+let faceWorkCanvas = null;
+let trackedFaces = []; // { id, box:{x,y,w,h}, missedFrames }
+let nextFaceId = 1;
+
+faceToggleBtn.onclick = async () => {
+  faceOn = !faceOn;
+  faceToggleBtn.classList.toggle('active', faceOn);
+  faceCanvas.classList.toggle('hidden-panel', !faceOn);
+  if (!faceOn) { faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height); trackedFaces = []; return; }
+
+  if (!faceDetector) {
+    faceToggleBtn.textContent = '…';
+    log('ok', 'Carico il modello di rilevamento volti…');
+    try {
+      const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm');
+      const filesetResolver = await vision.FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+      );
+      faceDetector = await vision.FaceDetector.createFromOptions(filesetResolver, {
+        baseOptions: {
+          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
+        },
+        runningMode: 'IMAGE',
+      });
+      log('ok', 'Modello volti pronto');
+    } catch (e) {
+      log('error', 'Impossibile caricare il rilevamento volti: ' + e.message);
+      faceOn = false;
+      faceToggleBtn.classList.remove('active');
+      faceCanvas.classList.add('hidden-panel');
+    } finally {
+      faceToggleBtn.textContent = '👤';
+    }
+  }
+  if (faceOn && faceDetector) startFaceLoop();
+};
+
+/** Intersection-over-Union tra due riquadri {x,y,w,h}: quanto si
+ * sovrappongono, da 0 (per niente) a 1 (identici). */
+function iou(a, b) {
+  const x1 = Math.max(a.x, b.x), y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.w, b.x + b.w), y2 = Math.min(a.y + a.h, b.y + b.h);
+  const interW = Math.max(0, x2 - x1), interH = Math.max(0, y2 - y1);
+  const interArea = interW * interH;
+  const unionArea = a.w * a.h + b.w * b.h - interArea;
+  return unionArea > 0 ? interArea / unionArea : 0;
+}
+
+/** Abbina i nuovi riquadri rilevati a quelli già tracciati: se si
+ * sovrappongono abbastanza, stesso ID di prima; altrimenti nuovo ID.
+ * Un volto non ritrovato per un paio di fotogrammi (es. sbattito di
+ * ciglia, breve occlusione) viene comunque tenuto un momento prima
+ * di essere tolto, per non far "lampeggiare" l'etichetta. */
+function updateFaceTracking(newBoxes) {
+  const updated = [];
+  const usedNew = new Set();
+  trackedFaces.forEach(t => {
+    let bestI = -1, bestScore = 0.3;
+    newBoxes.forEach((nb, i) => {
+      if (usedNew.has(i)) return;
+      const score = iou(t.box, nb);
+      if (score > bestScore) { bestScore = score; bestI = i; }
+    });
+    if (bestI >= 0) {
+      usedNew.add(bestI);
+      updated.push({ id: t.id, box: newBoxes[bestI], missedFrames: 0 });
+    } else if (t.missedFrames < 2) {
+      updated.push({ id: t.id, box: t.box, missedFrames: t.missedFrames + 1 });
+    }
+  });
+  newBoxes.forEach((nb, i) => {
+    if (!usedNew.has(i)) updated.push({ id: nextFaceId++, box: nb, missedFrames: 0 });
+  });
+  trackedFaces = updated;
+}
+
+async function startFaceLoop() {
+  if (faceLoopActive) return;
+  faceLoopActive = true;
+  if (!faceWorkCanvas) faceWorkCanvas = document.createElement('canvas');
+  while (faceOn) {
+    if (!document.getElementById('screen-camera').classList.contains('active')) {
+      await new Promise(r => setTimeout(r, 300));
+      continue;
+    }
+    try {
+      const rect = faceCanvas.getBoundingClientRect();
+      faceWorkCanvas.width = 240;
+      faceWorkCanvas.height = Math.round(240 * (rect.height / rect.width));
+      const wctx = faceWorkCanvas.getContext('2d');
+      if (liveViewOn) wctx.drawImage(liveViewImg, 0, 0, faceWorkCanvas.width, faceWorkCanvas.height);
+      else drawVideoCover(wctx, faceWorkCanvas);
+
+      const result = faceDetector.detect(faceWorkCanvas);
+      const newBoxes = (result.detections || []).map(d => ({
+        x: d.boundingBox.originX, y: d.boundingBox.originY,
+        w: d.boundingBox.width, h: d.boundingBox.height,
+      }));
+      updateFaceTracking(newBoxes);
+
+      faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
+      const scaleX = faceCanvas.width / faceWorkCanvas.width;
+      const scaleY = faceCanvas.height / faceWorkCanvas.height;
+      faceCtx.strokeStyle = '#F0A93C';
+      faceCtx.lineWidth = 2;
+      faceCtx.font = '14px sans-serif';
+      faceCtx.fillStyle = '#F0A93C';
+      trackedFaces.forEach(t => {
+        const x = t.box.x * scaleX, y = t.box.y * scaleY;
+        const w = t.box.w * scaleX, h = t.box.h * scaleY;
+        faceCtx.strokeRect(x, y, w, h);
+        faceCtx.fillText(`Volto ${t.id}`, x, Math.max(14, y - 6));
+      });
+    } catch (e) { /* un fallimento isolato non deve fermare il ciclo */ }
+    await new Promise(r => setTimeout(r, 300));
+  }
+  faceLoopActive = false;
+}
 
 // ---------- scatto diretto dalla schermata Fotocamera ----------
 const cameraShootBtn = document.getElementById('cameraShootBtn');
@@ -2413,9 +2566,9 @@ startrailApplyBtn.onclick = async () => {
   if (cameraConnected) {
     try {
       const aperture = parseFloat(startrailApertureEl.value);
-      await camera.setConfigValue('iso', String(iso));
-      await camera.setConfigValue('aperture', String(aperture));
-      await camera.setConfigValue('shutterspeed', exposureS.toFixed(1));
+      await withCameraLock(() => camera.setConfigValue('iso', String(iso)));
+      await withCameraLock(() => camera.setConfigValue('aperture', String(aperture)));
+      await withCameraLock(() => camera.setConfigValue('shutterspeed', exposureS.toFixed(1)));
       log('ok', `Applicato alla fotocamera: f/${aperture}, ISO ${iso}, ${exposureS.toFixed(1)}s`);
     } catch (e) {
       log('error', 'Impossibile impostare le impostazioni sulla fotocamera: ' + e.message + ' — impostale a mano da "Impostazioni manuali" in Fotocamera');
@@ -2492,9 +2645,9 @@ function startInterval() {
         if (shutterSec != null) {
           const shutterLabel = shutterSec < 1 ? `1/${Math.round(1 / shutterSec)}` : shutterSec.toFixed(1);
           try {
-            await camera.setConfigValue('iso', String(parseFloat(meterIsoEl.value)));
-            await camera.setConfigValue('aperture', String(parseFloat(meterLensEl.value)));
-            await camera.setConfigValue('shutterspeed', shutterLabel);
+            await withCameraLock(() => camera.setConfigValue('iso', String(parseFloat(meterIsoEl.value))));
+            await withCameraLock(() => camera.setConfigValue('aperture', String(parseFloat(meterLensEl.value))));
+            await withCameraLock(() => camera.setConfigValue('shutterspeed', shutterLabel));
           }
           catch (e) { log('error', 'Esposizione automatica: impossibile impostare i valori — ' + e.message); }
         }
