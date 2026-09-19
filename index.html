@@ -458,6 +458,22 @@
     </div>
   </div>
 
+  <div class="eyebrow">Sensore del telefono (rilevamento)</div>
+  <div class="panel">
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Fotocamera posteriore da usare</span></div>
+      <select id="phoneCameraSelect" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);width:100%;">
+        <option value="">Predefinita (scelta dal browser)</option>
+      </select>
+    </div>
+    <p class="log-empty" style="padding:10px 0 4px; text-align:left;">
+      Usata per l'esposimetro e i rilevamenti Flash/Animali — non è la
+      fotocamera che scatta la foto (quella è la A6100 via USB). Un
+      ultra-grandangolo copre più cielo per i fulmini, un sensore
+      principale è più sensibile al buio: prova entrambi.
+    </p>
+  </div>
+
   <div class="eyebrow">Scatto manuale</div>
   <div class="panel">
     <div class="ctrl">
@@ -1746,11 +1762,29 @@ function resizeMotionTrace() {
   motionTraceCanvas.height = rect.height * devicePixelRatio;
 }
 
-async function startCamPreview() {
+let currentPhoneStream = null;
+const phoneCameraSelect = document.getElementById('phoneCameraSelect');
+
+async function startCamPreview(deviceId) {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false
-    });
+    const videoConstraints = deviceId
+      ? { deviceId: { exact: deviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
+      : { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } };
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
+    } catch (e) {
+      if (!deviceId) throw e;
+      log('error', 'Sensore salvato non disponibile, torno a quello predefinito');
+      localStorage.removeItem('ft_phone_camera_id');
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false
+      });
+    }
+
+    if (currentPhoneStream) currentPhoneStream.getTracks().forEach(t => t.stop());
+    currentPhoneStream = stream;
+
     video.srcObject = stream;
     await video.play();
     const videoCamera = document.getElementById('videoCamera');
@@ -1767,12 +1801,34 @@ async function startCamPreview() {
     resizeTrace();
     resizeMotionTrace();
     requestAnimationFrame(analyzeLoop);
+    await populatePhoneCameraList();
   } catch (e) {
     log('error', 'Fotocamera del telefono non disponibile: ' + e.message);
   }
 }
 window.addEventListener('resize', resizeTrace);
 window.addEventListener('resize', resizeMotionTrace);
+
+/** Elenca le fotocamere posteriori disponibili. Le etichette (nomi reali,
+ * es. "Ultra-wide") sono visibili solo dopo che il permesso è stato
+ * concesso — prima di quel momento il browser le nasconde per privacy. */
+async function populatePhoneCameraList() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter(d => d.kind === 'videoinput');
+    const saved = localStorage.getItem('ft_phone_camera_id') || '';
+    phoneCameraSelect.innerHTML = '<option value="">Predefinita (scelta dal browser)</option>' +
+      cams.map((d, i) => `<option value="${d.deviceId}">${d.label || 'Fotocamera ' + (i + 1)}</option>`).join('');
+    phoneCameraSelect.value = saved && cams.some(d => d.deviceId === saved) ? saved : '';
+  } catch (e) { /* enumerazione fallita, non critico: resta la scelta predefinita */ }
+}
+
+phoneCameraSelect.onchange = () => {
+  const id = phoneCameraSelect.value;
+  localStorage.setItem('ft_phone_camera_id', id);
+  log('ok', id ? 'Cambio sensore in corso…' : 'Torno al sensore predefinito…');
+  startCamPreview(id || undefined);
+};
 
 function drawTrace() {
   const w = traceCanvas.width, h = traceCanvas.height;
@@ -2401,7 +2457,7 @@ function stopSchedule(finished = false) {
   }
 }
 
-startCamPreview();
+startCamPreview(localStorage.getItem('ft_phone_camera_id') || undefined);
 tryAutoConnect();
 refreshStats();
 goToScreen('camera');
