@@ -574,6 +574,29 @@
     <p class="log-empty" style="padding:10px 0 4px; text-align:left;">Stima approssimata per sensore APS-C (fattore di crop 1.5×, come la tua A6100). Oltre questo tempo le stelle iniziano a lasciare scie visibili.</p>
   </div>
 
+  <div class="eyebrow">Messa a fuoco manuale</div>
+  <div class="panel">
+    <div class="field-row">
+      <span class="name">Passo di regolazione</span>
+      <select id="focusStepSelect" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);">
+        <option value="1">Piccolo</option>
+        <option value="2" selected>Medio</option>
+        <option value="3">Grande</option>
+      </select>
+    </div>
+    <div class="field-row" style="gap:10px;">
+      <button class="btn-ghost" id="focusNearBtn" style="flex:1;">◀ Vicino</button>
+      <button class="btn-ghost" id="focusFarBtn" style="flex:1;">Lontano ▶</button>
+    </div>
+    <p class="log-empty" id="focusHint" style="padding:10px 0 4px; text-align:left;">
+      Sperimentale: il controllo del fuoco via USB è raro sui corpi Sony
+      (a differenza di Canon), a differenza di ISO/tempo/apertura. Se i
+      pulsanti non hanno effetto, probabilmente la A6100 non espone
+      questo comando su questa libreria — resta possibile solo la messa
+      a fuoco manuale sull'obiettivo o tramite autofocus della fotocamera stessa.
+    </p>
+  </div>
+
   <div class="eyebrow">Impostazioni manuali</div>
   <div class="panel">
     <div class="field-row">
@@ -630,6 +653,8 @@
   <div class="screen active" data-screen="camera" id="screen-camera">
     <div class="viewfinder">
       <video id="videoCamera" autoplay muted playsinline></video>
+      <img id="cameraLiveViewImg" class="hidden-panel" style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:1;">
+      <div class="readout hidden-panel" id="liveViewFpsReadout" style="top:auto; bottom: max(120px, calc(env(safe-area-inset-bottom) + 100px));"><span class="lbl">live view</span><span id="liveViewFpsValue">—</span></div>
 
       <div class="grid-overlay hidden-panel" id="gridOverlay">
         <div class="grid-line v" style="left:33.333%"></div>
@@ -653,6 +678,7 @@
         <button class="icon-btn-vf" id="levelToggleBtn">◐</button>
         <button class="icon-btn-vf" id="zebraToggleBtn">▤</button>
         <button class="icon-btn-vf" id="peakingToggleBtn">◈</button>
+        <button class="icon-btn-vf" id="liveViewToggleBtn">📷</button>
         <button class="icon-btn-vf" id="cameraGearBtn">⚙</button>
       </div>
 
@@ -1021,6 +1047,28 @@ async function tryAutoConnect() {
 const configPanel = document.getElementById('configPanel');
 const configRefreshBtn = document.getElementById('configRefreshBtn');
 
+// ---------- messa a fuoco manuale (sperimentale) ----------
+const focusStepSelect = document.getElementById('focusStepSelect');
+const focusNearBtn = document.getElementById('focusNearBtn');
+const focusFarBtn = document.getElementById('focusFarBtn');
+const focusHint = document.getElementById('focusHint');
+
+async function nudgeFocus(direction) {
+  if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
+  const step = focusStepSelect.value; // 1=piccolo 2=medio 3=grande, convenzione comune gphoto2
+  const value = direction === 'near' ? `Near ${step}` : `Far ${step}`;
+  try {
+    await camera.setConfigValue('manualfocusdrive', value);
+    log('ok', `Fuoco spostato: ${value}`);
+    focusHint.textContent = 'Il comando è stato accettato dalla fotocamera.';
+  } catch (e) {
+    log('error', 'Comando fuoco non supportato: ' + e.message);
+    focusHint.textContent = 'La A6100 non risponde a questo comando su questa libreria — probabilmente il controllo fuoco via USB non è implementato per questo corpo.';
+  }
+}
+focusNearBtn.onclick = () => nudgeFocus('near');
+focusFarBtn.onclick = () => nudgeFocus('far');
+
 configRefreshBtn.onclick = async () => {
   if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
   configPanel.innerHTML = '<p class="log-empty" style="padding:20px 0;">Lettura in corso…</p>';
@@ -1356,6 +1404,8 @@ wifiShootBtn.onclick = async () => {
 async function fireShutter(burstCount = 1, burstIntervalMs = 0) {
   if (!cameraConnected) return { ok: false, message: 'Fotocamera non connessa' };
   burstCount = Math.max(1, burstCount);
+  const wasLiveViewOn = liveViewOn;
+  if (wasLiveViewOn) liveViewOn = false; // evita conflitti tra preview e scatto vero sulla stessa sessione USB
   try {
     for (let i = 0; i < burstCount; i++) {
       const t0 = performance.now();
@@ -1370,7 +1420,66 @@ async function fireShutter(burstCount = 1, burstIntervalMs = 0) {
     return { ok: true, message: 'Scatto riuscito' };
   } catch (e) {
     return { ok: false, message: 'Errore scatto: ' + e.message };
+  } finally {
+    if (wasLiveViewOn) { liveViewOn = true; startLiveViewLoop(); }
   }
+}
+
+// --------------------------------------------------------------------
+// LIVE VIEW REALE — usa camera.capturePreviewAsBlob() per mostrare
+// quello che la A6100 sta davvero inquadrando, non la fotocamera del
+// telefono. Più lento di un video vero (il live view via USB su
+// libgphoto2 gira a pochi fotogrammi al secondo, non 30fps), ma è
+// l'inquadratura reale della fotocamera che scatterà.
+// --------------------------------------------------------------------
+let liveViewOn = false;
+let liveViewLoopActive = false;
+const liveViewImg = document.getElementById('cameraLiveViewImg');
+const liveViewToggleBtn = document.getElementById('liveViewToggleBtn');
+const liveViewFpsReadout = document.getElementById('liveViewFpsReadout');
+const liveViewFpsValue = document.getElementById('liveViewFpsValue');
+let liveViewLastFrameTime = null;
+let liveViewFpsSmoothed = null;
+
+liveViewToggleBtn.onclick = () => {
+  if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
+  liveViewOn = !liveViewOn;
+  liveViewToggleBtn.classList.toggle('active', liveViewOn);
+  liveViewImg.classList.toggle('hidden-panel', !liveViewOn);
+  liveViewFpsReadout.classList.toggle('hidden-panel', !liveViewOn);
+  if (!liveViewOn) { liveViewLastFrameTime = null; liveViewFpsSmoothed = null; liveViewFpsValue.textContent = '—'; }
+  if (liveViewOn) startLiveViewLoop();
+};
+
+async function startLiveViewLoop() {
+  if (liveViewLoopActive) return;
+  liveViewLoopActive = true;
+  while (liveViewOn && cameraConnected) {
+    try {
+      const blob = await camera.capturePreviewAsBlob();
+      const url = URL.createObjectURL(blob);
+      const prevUrl = liveViewImg.src;
+      liveViewImg.src = url;
+      if (prevUrl && prevUrl.startsWith('blob:')) URL.revokeObjectURL(prevUrl);
+
+      const now = performance.now();
+      if (liveViewLastFrameTime != null) {
+        const instFps = 1000 / (now - liveViewLastFrameTime);
+        liveViewFpsSmoothed = liveViewFpsSmoothed == null ? instFps : liveViewFpsSmoothed * 0.7 + instFps * 0.3;
+        liveViewFpsValue.textContent = liveViewFpsSmoothed.toFixed(1) + ' fps';
+      }
+      liveViewLastFrameTime = now;
+    } catch (e) {
+      log('error', 'Live view non disponibile: ' + e.message);
+      liveViewOn = false;
+      liveViewImg.classList.add('hidden-panel');
+      liveViewFpsReadout.classList.add('hidden-panel');
+      liveViewToggleBtn.classList.remove('active');
+      break;
+    }
+    await new Promise(r => setTimeout(r, 50));
+  }
+  liveViewLoopActive = false;
 }
 
 // ---------- statistiche (localStorage, niente server) ----------
