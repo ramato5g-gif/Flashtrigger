@@ -528,6 +528,15 @@
       <div class="ctrl-head"><span class="name">Intervallo raffica</span><span class="num" id="manualBurstIntervalVal">0 ms</span></div>
       <input type="range" id="manualBurstInterval" min="0" max="500" value="0" step="10">
     </div>
+    <div class="field-row">
+      <span class="name">Scatto vocale</span>
+      <button class="btn-ghost" id="voiceToggleBtn">Off</button>
+    </div>
+    <div class="field-row">
+      <span class="name">Parola di attivazione</span>
+      <input type="text" id="voiceWordInput" value="scatta" style="width:120px;">
+    </div>
+    <p class="log-empty" id="voiceHint" style="padding:8px 0 2px; text-align:left; display:none;">In ascolto…</p>
   </div>
 
   <div class="eyebrow">Esposimetro live</div>
@@ -643,6 +652,27 @@
     <p class="log-empty" style="padding:20px 0;">Tocca "Aggiorna" per leggere le impostazioni attuali dalla fotocamera.</p>
   </div>
 
+  <div class="eyebrow">Bluetooth — scatto senza cavo</div>
+  <div class="panel">
+    <div class="field-row">
+      <span class="name">Fotocamera</span>
+      <span id="bleStatusText" style="color:var(--muted); font-size:13px;">non connessa</span>
+    </div>
+    <div class="field-row">
+      <span class="name">Connetti</span>
+      <button class="btn-ghost" id="bleConnectBtn">Connetti</button>
+    </div>
+    <p class="log-empty" id="bleHint" style="padding:10px 0 4px; text-align:left;">
+      Protocollo Bluetooth Sony reverse-ingegnerizzato dalla community
+      (compatibilità A6100 confermata). Sulla fotocamera: Menu → Wireless
+      → Controllo remoto Bluetooth → metti in modalità abbinamento, poi
+      tocca Connetti. Una volta connesso, tutti i trigger (Flash,
+      Intervallo, Animali, ecc.) scattano via Bluetooth invece che USB —
+      niente più cavo. Comanda solo lo scatto: per ISO/tempo/apertura e
+      live view serve ancora l'USB.
+    </p>
+  </div>
+
   <div class="eyebrow">WiFi (sperimentale)</div>
   <div class="panel">
     <div class="field-row">
@@ -661,9 +691,8 @@
       Sperimentale — la A6100 non è nella lista ufficiale di compatibilità di
       questa API Sony, e il browser potrebbe bloccare la lettura della
       risposta per policy di sicurezza (CORS) anche se il comando arriva.
-      Collega il telefono al WiFi creato dalla fotocamera (modalità "Invia a
-      smartphone" o "Controllo remoto intelligente"), poi tocca Verifica.
-      Se non risponde, l'USB resta l'opzione affidabile.
+      Il Bluetooth qui sopra è la via wireless più solida delle due — prova
+      prima quella.
     </p>
   </div>
 
@@ -1494,7 +1523,99 @@ wifiShootBtn.onclick = async () => {
 };
 
 /** Esegue uno scatto (con eventuale raffica) direttamente via WebUSB. */
+// --------------------------------------------------------------------
+// BLUETOOTH — protocollo Sony BLE reverse-ingegnerizzato dalla community
+// (progetto "freemote", compatibilità A6100 confermata). Comanda solo lo
+// scatto (simula la pressione del pulsante), non le impostazioni — per
+// quelle e per il live view serve ancora l'USB.
+//
+// La sequenza dei comandi è quella che la fotocamera si aspetta da un
+// vero telecomando fisico: "mezza pressione (fuoco) → pressione piena
+// (scatto) → rilascio mezza pressione → rilascio pieno". Saltare un
+// passaggio o sbagliare l'ordine è esattamente il tipo di errore che può
+// mandare la fotocamera in blocco, come già successo lato USB — qui la
+// sequenza è rispettata alla lettera.
+// --------------------------------------------------------------------
+const BLE_SERVICE_UUID = '8000ff00-ff00-ffff-ffff-ffffffffffff';
+const BLE_COMMAND_CHAR_UUID = '8000ff01-ff00-ffff-ffff-ffffffffffff'; // comandi verso la fotocamera
+const BLE_STATUS_CHAR_UUID = '8000ff02-ff00-ffff-ffff-ffffffffffff'; // notifiche dalla fotocamera
+
+let bleDevice = null;
+let bleCommandChar = null;
+let bleConnected = false;
+
+const bleConnectBtn = document.getElementById('bleConnectBtn');
+const bleStatusText = document.getElementById('bleStatusText');
+const bleHint = document.getElementById('bleHint');
+
+function setBleStatus(ok, text) {
+  bleConnected = ok;
+  bleStatusText.textContent = text || (ok ? 'connessa' : 'non connessa');
+  bleStatusText.style.color = ok ? 'var(--trace)' : 'var(--muted)';
+}
+
+bleConnectBtn.onclick = async () => {
+  if (!('bluetooth' in navigator)) { log('error', 'Web Bluetooth non disponibile su questo browser'); return; }
+  bleConnectBtn.disabled = true;
+  try {
+    bleDevice = await navigator.bluetooth.requestDevice({
+      filters: [{ manufacturerData: [{ companyIdentifier: 0x012D }] }], // identificativo Bluetooth di Sony
+      optionalServices: [BLE_SERVICE_UUID],
+    });
+    bleDevice.addEventListener('gattserverdisconnected', () => {
+      setBleStatus(false);
+      log('error', 'Bluetooth disconnesso');
+    });
+    const server = await bleDevice.gatt.connect();
+    const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+    bleCommandChar = await service.getCharacteristic(BLE_COMMAND_CHAR_UUID);
+    setBleStatus(true);
+    log('ok', 'Fotocamera connessa via Bluetooth');
+    bleHint.textContent = 'Connesso — i trigger ora scattano via Bluetooth.';
+  } catch (e) {
+    setBleStatus(false);
+    log('error', 'Connessione Bluetooth fallita: ' + e.message);
+  } finally {
+    bleConnectBtn.disabled = false;
+  }
+};
+
+async function bleWriteCommand(bytes) {
+  await withCameraLock(() => bleCommandChar.writeValue(new Uint8Array(bytes)));
+}
+
+/** Una pressione completa e corretta del pulsante di scatto via
+ * Bluetooth: mezza pressione, pressione piena, rilascio mezza, rilascio
+ * piena — con una pausa breve tra i passaggi perché la fotocamera abbia
+ * il tempo di mettere a fuoco prima dello scatto vero e proprio. */
+async function bleShutterPress() {
+  await bleWriteCommand([0x01, 0x07]); // mezza pressione (fuoco)
+  await new Promise(r => setTimeout(r, 150));
+  await bleWriteCommand([0x01, 0x09]); // pressione piena (scatto)
+  await new Promise(r => setTimeout(r, 100));
+  await bleWriteCommand([0x01, 0x06]); // rilascio mezza pressione
+  await new Promise(r => setTimeout(r, 30));
+  await bleWriteCommand([0x01, 0x08]); // rilascio pieno
+}
+
 async function fireShutter(burstCount = 1, burstIntervalMs = 0) {
+  if (bleConnected) {
+    burstCount = Math.max(1, burstCount);
+    try {
+      for (let i = 0; i < burstCount; i++) {
+        const t0 = performance.now();
+        await bleShutterPress();
+        const dt = Math.round(performance.now() - t0);
+        if (burstCount > 1) log('ok', `Scatto ${i + 1}/${burstCount} in ${dt} ms (Bluetooth)`);
+        else log('ok', `Scatto in ${dt} ms (Bluetooth)`);
+        if (i < burstCount - 1 && burstIntervalMs > 0) await new Promise(r => setTimeout(r, burstIntervalMs));
+      }
+      return { ok: true, message: 'Scatto riuscito (Bluetooth)' };
+    } catch (e) {
+      return { ok: false, message: 'Errore scatto Bluetooth: ' + e.message };
+    }
+  }
+
   if (!cameraConnected) return { ok: false, message: 'Fotocamera non connessa' };
   burstCount = Math.max(1, burstCount);
   const wasLiveViewOn = liveViewOn;
@@ -1948,22 +2069,25 @@ setInterval(() => {
 }, 150);
 
 // --------------------------------------------------------------------
-// RILEVAMENTO E TRACCIAMENTO VOLTI — MediaPipe Face Detector (il modello
-// attuale di Google, mantenuto attivamente), caricato solo al primo
-// utilizzo. Sopra il rilevamento grezzo (per fotogramma) aggiungiamo un
-// tracciamento vero: ogni volto riceve un ID che resta lo stesso da un
-// fotogramma all'altro (abbinamento per sovrapposizione dei riquadri —
-// tecnica IoU), così un volto che si muove nell'inquadratura mantiene
-// la sua etichetta invece di venire ridisegnato come "nuovo" ogni volta.
+// RILEVAMENTO E TRACCIAMENTO VOLTI — MediaPipe Face Landmarker (478 punti
+// per volto: occhi, labbra, contorno — non solo un riquadro), caricato
+// solo al primo utilizzo. Sopra i punti grezzi (per fotogramma)
+// aggiungiamo un tracciamento vero: ogni volto riceve un ID che resta lo
+// stesso da un fotogramma all'altro (abbinamento per sovrapposizione dei
+// riquadri — tecnica IoU), così un volto che si muove nell'inquadratura
+// mantiene la sua etichetta invece di venire ridisegnato come "nuovo"
+// ogni volta. Ciclo ogni 100ms (prima 300ms) per un aggiornamento più
+// fluido.
 // --------------------------------------------------------------------
 const faceToggleBtn = document.getElementById('faceToggleBtn');
 const faceCanvas = document.getElementById('faceCanvas');
 const faceCtx = faceCanvas.getContext('2d');
 let faceOn = false;
-let faceDetector = null;
+let faceLandmarker = null;
+let faceDrawingConnections = null; // { lips, leftEye, rightEye, faceOval }
 let faceLoopActive = false;
 let faceWorkCanvas = null;
-let trackedFaces = []; // { id, box:{x,y,w,h}, missedFrames }
+let trackedFaces = []; // { id, box:{x,y,w,h}, landmarks, missedFrames }
 let nextFaceId = 1;
 
 faceToggleBtn.onclick = async () => {
@@ -1972,7 +2096,7 @@ faceToggleBtn.onclick = async () => {
   faceCanvas.classList.toggle('hidden-panel', !faceOn);
   if (!faceOn) { faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height); trackedFaces = []; return; }
 
-  if (!faceDetector) {
+  if (!faceLandmarker) {
     faceToggleBtn.textContent = '…';
     log('ok', 'Carico il modello di rilevamento volti…');
     try {
@@ -1980,12 +2104,21 @@ faceToggleBtn.onclick = async () => {
       const filesetResolver = await vision.FilesetResolver.forVisionTasks(
         'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
       );
-      faceDetector = await vision.FaceDetector.createFromOptions(filesetResolver, {
+      faceLandmarker = await vision.FaceLandmarker.createFromOptions(filesetResolver, {
         baseOptions: {
-          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
+          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
         },
-        runningMode: 'IMAGE',
+        runningMode: 'VIDEO',
+        numFaces: 4,
+        outputFaceBlendshapes: false,
+        outputFacialTransformationMatrixes: false,
       });
+      faceDrawingConnections = {
+        lips: vision.FaceLandmarker.FACE_LANDMARKS_LIPS,
+        leftEye: vision.FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,
+        rightEye: vision.FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,
+        faceOval: vision.FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,
+      };
       log('ok', 'Modello volti pronto');
     } catch (e) {
       log('error', 'Impossibile caricare il rilevamento volti: ' + e.message);
@@ -1996,7 +2129,7 @@ faceToggleBtn.onclick = async () => {
       faceToggleBtn.textContent = '👤';
     }
   }
-  if (faceOn && faceDetector) startFaceLoop();
+  if (faceOn && faceLandmarker) startFaceLoop();
 };
 
 /** Intersection-over-Union tra due riquadri {x,y,w,h}: quanto si
@@ -2010,32 +2143,54 @@ function iou(a, b) {
   return unionArea > 0 ? interArea / unionArea : 0;
 }
 
-/** Abbina i nuovi riquadri rilevati a quelli già tracciati: se si
- * sovrappongono abbastanza, stesso ID di prima; altrimenti nuovo ID.
- * Un volto non ritrovato per un paio di fotogrammi (es. sbattito di
- * ciglia, breve occlusione) viene comunque tenuto un momento prima
- * di essere tolto, per non far "lampeggiare" l'etichetta. */
-function updateFaceTracking(newBoxes) {
+/** Ricava un riquadro min/max dai 478 punti di un volto, per riusare lo
+ * stesso abbinamento IoU già collaudato con il modello precedente. */
+function boxFromLandmarks(landmarks) {
+  let minX = 1, minY = 1, maxX = 0, maxY = 0;
+  landmarks.forEach(p => {
+    if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
+  });
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }; // coordinate normalizzate 0-1
+}
+
+/** Abbina i nuovi volti rilevati a quelli già tracciati: se i riquadri si
+ * sovrappongono abbastanza, stesso ID di prima; altrimenti nuovo ID. Un
+ * volto non ritrovato per un paio di fotogrammi (es. sbattito di ciglia,
+ * breve occlusione) viene tenuto un momento prima di essere tolto, per
+ * non far "lampeggiare" l'etichetta. */
+function updateFaceTracking(newFaces) {
   const updated = [];
   const usedNew = new Set();
   trackedFaces.forEach(t => {
     let bestI = -1, bestScore = 0.3;
-    newBoxes.forEach((nb, i) => {
+    newFaces.forEach((nf, i) => {
       if (usedNew.has(i)) return;
-      const score = iou(t.box, nb);
+      const score = iou(t.box, nf.box);
       if (score > bestScore) { bestScore = score; bestI = i; }
     });
     if (bestI >= 0) {
       usedNew.add(bestI);
-      updated.push({ id: t.id, box: newBoxes[bestI], missedFrames: 0 });
+      updated.push({ id: t.id, box: newFaces[bestI].box, landmarks: newFaces[bestI].landmarks, missedFrames: 0 });
     } else if (t.missedFrames < 2) {
-      updated.push({ id: t.id, box: t.box, missedFrames: t.missedFrames + 1 });
+      updated.push({ id: t.id, box: t.box, landmarks: t.landmarks, missedFrames: t.missedFrames + 1 });
     }
   });
-  newBoxes.forEach((nb, i) => {
-    if (!usedNew.has(i)) updated.push({ id: nextFaceId++, box: nb, missedFrames: 0 });
+  newFaces.forEach((nf, i) => {
+    if (!usedNew.has(i)) updated.push({ id: nextFaceId++, box: nf.box, landmarks: nf.landmarks, missedFrames: 0 });
   });
   trackedFaces = updated;
+}
+
+function drawFaceConnections(landmarks, connections, w, h) {
+  faceCtx.beginPath();
+  connections.forEach(c => {
+    const a = landmarks[c.start], b = landmarks[c.end];
+    if (!a || !b) return;
+    faceCtx.moveTo(a.x * w, a.y * h);
+    faceCtx.lineTo(b.x * w, b.y * h);
+  });
+  faceCtx.stroke();
 }
 
 async function startFaceLoop() {
@@ -2044,39 +2199,41 @@ async function startFaceLoop() {
   if (!faceWorkCanvas) faceWorkCanvas = document.createElement('canvas');
   while (faceOn) {
     if (!document.getElementById('screen-camera').classList.contains('active')) {
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise(r => setTimeout(r, 200));
       continue;
     }
     try {
       const rect = faceCanvas.getBoundingClientRect();
-      faceWorkCanvas.width = 240;
-      faceWorkCanvas.height = Math.round(240 * (rect.height / rect.width));
+      faceWorkCanvas.width = 320;
+      faceWorkCanvas.height = Math.round(320 * (rect.height / rect.width));
       const wctx = faceWorkCanvas.getContext('2d');
       if (liveViewOn) wctx.drawImage(liveViewImg, 0, 0, faceWorkCanvas.width, faceWorkCanvas.height);
       else drawVideoCover(wctx, faceWorkCanvas);
 
-      const result = faceDetector.detect(faceWorkCanvas);
-      const newBoxes = (result.detections || []).map(d => ({
-        x: d.boundingBox.originX, y: d.boundingBox.originY,
-        w: d.boundingBox.width, h: d.boundingBox.height,
+      const result = faceLandmarker.detectForVideo(faceWorkCanvas, performance.now());
+      const newFaces = (result.faceLandmarks || []).map(landmarks => ({
+        box: boxFromLandmarks(landmarks),
+        landmarks,
       }));
-      updateFaceTracking(newBoxes);
+      updateFaceTracking(newFaces);
 
-      faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
-      const scaleX = faceCanvas.width / faceWorkCanvas.width;
-      const scaleY = faceCanvas.height / faceWorkCanvas.height;
+      const w = faceCanvas.width, h = faceCanvas.height;
+      faceCtx.clearRect(0, 0, w, h);
       faceCtx.strokeStyle = '#F0A93C';
-      faceCtx.lineWidth = 2;
-      faceCtx.font = '14px sans-serif';
+      faceCtx.lineWidth = 1.5;
+      faceCtx.font = '13px sans-serif';
       faceCtx.fillStyle = '#F0A93C';
       trackedFaces.forEach(t => {
-        const x = t.box.x * scaleX, y = t.box.y * scaleY;
-        const w = t.box.w * scaleX, h = t.box.h * scaleY;
-        faceCtx.strokeRect(x, y, w, h);
-        faceCtx.fillText(`Volto ${t.id}`, x, Math.max(14, y - 6));
+        if (t.landmarks && faceDrawingConnections) {
+          drawFaceConnections(t.landmarks, faceDrawingConnections.faceOval, w, h);
+          drawFaceConnections(t.landmarks, faceDrawingConnections.leftEye, w, h);
+          drawFaceConnections(t.landmarks, faceDrawingConnections.rightEye, w, h);
+          drawFaceConnections(t.landmarks, faceDrawingConnections.lips, w, h);
+        }
+        faceCtx.fillText(`Volto ${t.id}`, t.box.x * w, Math.max(14, t.box.y * h - 8));
       });
     } catch (e) { /* un fallimento isolato non deve fermare il ciclo */ }
-    await new Promise(r => setTimeout(r, 300));
+    await new Promise(r => setTimeout(r, 100));
   }
   faceLoopActive = false;
 }
@@ -2094,6 +2251,87 @@ cameraShootBtn.onclick = async () => {
   if (result.ok) recordFlashEventSilent();
   cameraShootBtn.disabled = false;
 };
+
+// --------------------------------------------------------------------
+// SCATTO VOCALE — riconoscimento vocale del browser (Web Speech API).
+// Nota onesta: su Chrome questo di solito passa dai server di Google
+// per riconoscere il parlato, quindi richiede una connessione internet
+// anche se gira "nel browser" — a differenza del resto dell'app non
+// funziona a telefono isolato in hotspot senza rete.
+// --------------------------------------------------------------------
+const voiceToggleBtn = document.getElementById('voiceToggleBtn');
+const voiceWordInput = document.getElementById('voiceWordInput');
+const voiceHint = document.getElementById('voiceHint');
+let voiceOn = false;
+let voiceRecognition = null;
+let lastVoiceTrigger = 0;
+
+voiceWordInput.value = localStorage.getItem('ft_voice_word') || 'scatta';
+voiceWordInput.onchange = () => localStorage.setItem('ft_voice_word', voiceWordInput.value.trim().toLowerCase());
+
+function applyVoiceUI() {
+  voiceToggleBtn.textContent = voiceOn ? 'On' : 'Off';
+  voiceHint.style.display = voiceOn ? 'block' : 'none';
+}
+
+function initVoiceRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  const r = new SR();
+  r.lang = 'it-IT';
+  r.continuous = true;
+  r.interimResults = false;
+  r.onresult = (event) => {
+    const last = event.results[event.results.length - 1];
+    const transcript = last[0].transcript.trim().toLowerCase();
+    const word = voiceWordInput.value.trim().toLowerCase();
+    if (word && transcript.includes(word)) {
+      voiceHint.textContent = `Riconosciuto "${transcript}" → scatto`;
+      triggerVoiceShot();
+    } else {
+      voiceHint.textContent = `In ascolto… (ultimo: "${transcript}")`;
+    }
+  };
+  r.onerror = (event) => {
+    log('error', 'Scatto vocale: ' + event.error);
+    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      voiceOn = false;
+      applyVoiceUI();
+    }
+  };
+  r.onend = () => {
+    // Chrome interrompe il riconoscimento dopo un po' di silenzio o un
+    // tempo massimo: se è ancora attivo dal nostro punto di vista, lo
+    // fa ripartire da solo invece di restare muto senza avvisare.
+    if (voiceOn) { try { r.start(); } catch (e) { /* già in esecuzione, ignora */ } }
+  };
+  return r;
+}
+
+voiceToggleBtn.onclick = () => {
+  if (!voiceOn) {
+    if (!voiceRecognition) voiceRecognition = initVoiceRecognition();
+    if (!voiceRecognition) { log('error', 'Riconoscimento vocale non supportato su questo browser'); return; }
+    voiceOn = true;
+    applyVoiceUI();
+    voiceHint.textContent = 'In ascolto…';
+    try { voiceRecognition.start(); } catch (e) { log('error', 'Errore avvio microfono: ' + e.message); }
+  } else {
+    voiceOn = false;
+    applyVoiceUI();
+    if (voiceRecognition) voiceRecognition.stop();
+  }
+};
+
+async function triggerVoiceShot() {
+  const now = performance.now();
+  if (now - lastVoiceTrigger < 2000) return; // pausa minima per non scattare più volte sulla stessa frase
+  lastVoiceTrigger = now;
+  if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
+  const result = await fireShutter(parseInt(manualBurstCountEl.value, 10), parseInt(manualBurstIntervalEl.value, 10));
+  log(result.ok ? 'ok' : 'error', result.message);
+  if (result.ok) recordFlashEventSilent();
+}
 
 // ---------- persistenza locale impostazioni ----------
 thresholdEl.value = localStorage.getItem('ft_threshold') || 35;
