@@ -478,6 +478,33 @@
     </div>
   </div>
 
+  <div class="eyebrow">Preset scena</div>
+  <div class="panel">
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Obiettivo / apertura disponibile</span></div>
+      <select id="sceneLens" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);width:100%;">
+        <option value="2">Samyang 12mm F2.0</option>
+        <option value="3.5">Sony 18-135mm — f/3.5 (grandangolo)</option>
+        <option value="4.5">Sony 18-135mm — f/4.5 (medio)</option>
+        <option value="5.6">Sony 18-135mm — f/5.6 (tele)</option>
+        <option value="8">f/8</option>
+        <option value="11">f/11</option>
+        <option value="16">f/16</option>
+      </select>
+    </div>
+    <div class="field-row" style="flex-wrap:wrap; gap:8px;">
+      <button class="btn-ghost" id="scenePaesaggioBtn" style="flex:1 1 45%;">🏞️ Paesaggio</button>
+      <button class="btn-ghost" id="sceneRitrattoBtn" style="flex:1 1 45%;">🙂 Ritratto</button>
+      <button class="btn-ghost" id="sceneSportBtn" style="flex:1 1 45%;">🏃 Sport</button>
+      <button class="btn-ghost" id="sceneNotteBtn" style="flex:1 1 45%;">🌙 Notte</button>
+    </div>
+    <p class="log-empty" id="sceneHint" style="padding:10px 0 4px; text-align:left;">
+      Se hai calibrato l'esposimetro più sotto, i preset calcolano il
+      tempo di posa sulla luce reale rilevata in questo momento — altrimenti
+      usano un valore di base indicativo, da affinare a mano.
+    </p>
+  </div>
+
   <div class="eyebrow">Griglia di composizione</div>
   <div class="panel">
     <div class="ctrl">
@@ -1236,10 +1263,10 @@ meterCalibrateBtn.onclick = () => {
 /** Tempo di posa suggerito (secondi), per reciprocità rispetto alla
  * calibrazione: shutter = shutter_rif × (ISO_rif/ISO scelto) ×
  * (apertura scelta / apertura_rif)² × (luce_rif / luce_attuale). */
-function computeSuggestedShutter() {
+function computeSuggestedShutter(apertureChosen, isoChosen) {
   if (!meterCal || currentBrightness <= 0) return null;
-  const apertureChosen = parseFloat(meterLensEl.value);
-  const isoChosen = parseFloat(meterIsoEl.value);
+  if (apertureChosen == null) apertureChosen = parseFloat(meterLensEl.value);
+  if (isoChosen == null) isoChosen = parseFloat(meterIsoEl.value);
   return meterCal.shutterRef *
     (meterCal.isoRef / isoChosen) *
     Math.pow(apertureChosen / meterCal.apertureRef, 2) *
@@ -1620,6 +1647,40 @@ function openMotionSheet() { motionSheet.classList.add('open'); motionSheetOverl
 function closeMotionSheet() { motionSheet.classList.remove('open'); motionSheetOverlay.classList.remove('open'); }
 motionGearBtn.onclick = openMotionSheet;
 motionSheetOverlay.onclick = closeMotionSheet;
+
+// ---------- preset scena (paesaggio/ritratto/sport/notte) ----------
+const sceneLensEl = document.getElementById('sceneLens');
+const sceneHint = document.getElementById('sceneHint');
+
+async function applyScenePreset(name, iso, fallbackShutterLabel) {
+  if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
+  const aperture = parseFloat(sceneLensEl.value);
+  let shutterLabel = fallbackShutterLabel;
+  let source = 'valore di base';
+
+  if (meterCal) {
+    const shutterSec = computeSuggestedShutter(aperture, iso);
+    if (shutterSec != null && isFinite(shutterSec) && shutterSec > 0) {
+      shutterLabel = shutterSec < 1 ? `1/${Math.round(1 / shutterSec)}` : shutterSec.toFixed(1);
+      source = 'luce reale rilevata';
+    }
+  }
+
+  try {
+    await camera.setConfigValue('iso', String(iso));
+    await camera.setConfigValue('aperture', String(aperture));
+    await camera.setConfigValue('shutterspeed', shutterLabel);
+    log('ok', `Preset ${name}: f/${aperture}, ISO ${iso}, ${shutterLabel} (${source})`);
+    sceneHint.textContent = `Applicato "${name}" usando ${source}.` + (source === 'valore di base' ? ' Calibra l\'esposimetro più sotto per usare la luce reale.' : '');
+  } catch (e) {
+    log('error', `Preset ${name} non applicato: ` + e.message);
+  }
+}
+
+document.getElementById('scenePaesaggioBtn').onclick = () => applyScenePreset('Paesaggio', 100, '1/125');
+document.getElementById('sceneRitrattoBtn').onclick = () => applyScenePreset('Ritratto', 200, '1/200');
+document.getElementById('sceneSportBtn').onclick = () => applyScenePreset('Sport', 800, '1/1000');
+document.getElementById('sceneNotteBtn').onclick = () => applyScenePreset('Notte', 1600, '1/30');
 
 // ---------- griglia di composizione ----------
 const gridToggleBtn = document.getElementById('gridToggleBtn');
