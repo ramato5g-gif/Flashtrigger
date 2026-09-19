@@ -28,6 +28,7 @@
     --live: #FF5B45;
     --live-dim: #4A241D;
     --trace: #57D6C4;
+    --wild: #8BC34A;
     --font-display: 'Space Grotesk', -apple-system, sans-serif;
     --font-body: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
@@ -94,6 +95,7 @@
   .drawer-item.active .tab-dot.flash { background: var(--live); }
   .drawer-item.active .tab-dot.interval { background: var(--trace); }
   .drawer-item.active .tab-dot.sun { background: var(--accent); }
+  .drawer-item.active .tab-dot.motion { background: var(--wild); }
   .drawer-item .badge {
     margin-left: auto; font-family: var(--font-display); font-size: 10.5px; font-weight: 600; color: var(--muted);
     font-variant-numeric: tabular-nums; padding: 2px 7px; border-radius: 10px; background: var(--panel-2); letter-spacing: 0.03em;
@@ -101,6 +103,7 @@
   .drawer-item .badge.on-flash { color: var(--live); background: rgba(255,91,69,0.14); }
   .drawer-item .badge.on-interval { color: var(--trace); background: rgba(87,214,196,0.14); }
   .drawer-item .badge.on-sun { color: var(--accent); background: rgba(240,169,60,0.14); }
+  .drawer-item .badge.on-motion { color: var(--wild); background: rgba(139,195,74,0.14); }
   .drawer-spacer { flex: 1; }
 
   /* ---------- screens ---------- */
@@ -111,7 +114,7 @@
   @keyframes screenIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
   /* ---------- viewfinder (schermata Flash, stile fotocamera) ---------- */
-  #screen-flash, #screen-camera { overflow: hidden; }
+  #screen-flash, #screen-camera, #screen-motion { overflow: hidden; }
   .viewfinder { position: relative; flex: 1; background: #000; overflow: hidden; }
   video { width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0.85; }
   canvas.hidden { display: none; }
@@ -168,8 +171,15 @@
   }
 
   .vf-shutter-row {
-    position: absolute; left: 0; right: 0; bottom: max(22px, env(safe-area-inset-bottom));
+    position: absolute; left: 0; right: 0; bottom: max(36px, calc(env(safe-area-inset-bottom) + 24px));
     display: flex; justify-content: center; z-index: 3;
+  }
+
+  .countdown-overlay {
+    position: absolute; inset: 0; z-index: 5;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.4);
+    font-family: var(--font-display); font-weight: 700; font-size: 96px; color: var(--text);
   }
 
   .flash-flag {
@@ -247,6 +257,7 @@
   .mode-pill.active[data-screen="flash"] { color: var(--live); }
   .mode-pill.active[data-screen="interval"] { color: var(--trace); }
   .mode-pill.active[data-screen="sun"] { color: var(--accent); }
+  .mode-pill.active[data-screen="motion"] { color: var(--wild); }
 
   .shutter-row { display: flex; align-items: center; justify-content: center; position: relative; height: 76px; }
   .shutter-btn {
@@ -336,6 +347,7 @@
   <button class="drawer-item" data-screen="flash"><span class="tab-dot flash"></span>Flash<span class="badge" id="badgeFlash"></span></button>
   <button class="drawer-item" data-screen="interval"><span class="tab-dot interval"></span>Intervallo<span class="badge" id="badgeInterval"></span></button>
   <button class="drawer-item" data-screen="sun"><span class="tab-dot sun"></span>Alba/Tramonto<span class="badge" id="badgeSun"></span></button>
+  <button class="drawer-item" data-screen="motion"><span class="tab-dot motion"></span>Animali<span class="badge" id="badgeMotion"></span></button>
 
   <div class="drawer-section">Info</div>
   <button class="drawer-item" data-screen="stats">Statistiche</button>
@@ -388,6 +400,44 @@
   </div>
 </div>
 
+<div class="sheet-overlay" id="motionSheetOverlay"></div>
+<div class="sheet" id="motionSheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">Impostazioni Animali</div>
+  <div class="panel">
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Sensibilità movimento</span><span class="num" id="motionThresholdVal">35</span></div>
+      <input type="range" id="motionThreshold" min="5" max="90" value="35">
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Ritardo scatto</span><span class="num" id="motionDelayVal">0 ms</span></div>
+      <input type="range" id="motionDelay" min="0" max="1000" value="0" step="50">
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Pausa tra scatti</span><span class="num" id="motionCooldownVal">3.0 s</span></div>
+      <input type="range" id="motionCooldown" min="500" max="15000" value="3000" step="100">
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Scatti in raffica</span><span class="num" id="motionBurstCountVal">3</span></div>
+      <input type="range" id="motionBurstCount" min="1" max="10" value="3">
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Intervallo raffica</span><span class="num" id="motionBurstIntervalVal">200 ms</span></div>
+      <input type="range" id="motionBurstInterval" min="0" max="1000" value="200" step="10">
+    </div>
+  </div>
+  <div class="panel">
+    <p style="font-size:13px; color:var(--muted); line-height:1.5; margin:10px 0;">
+      Confronta ogni fotogramma con il precedente: quando qualcosa si
+      muove abbastanza nell'inquadratura, scatta. Pensato per fototrappole
+      — punta il telefono e la fotocamera verso lo stesso punto e lascia
+      "Pausa tra scatti" abbastanza alta da non sprecare scatti sullo
+      stesso passaggio di un animale.
+    </p>
+  </div>
+</div>
+
+
 <div class="sheet-overlay" id="cameraSheetOverlay"></div>
 <div class="sheet" id="cameraSheet">
   <div class="sheet-handle"></div>
@@ -403,12 +453,34 @@
     </div>
   </div>
 
+  <div class="eyebrow">Scatto manuale</div>
+  <div class="panel">
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Autoscatto</span></div>
+      <select id="selfTimerSelect" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);width:100%;">
+        <option value="0">Off</option>
+        <option value="2">2 s</option>
+        <option value="5">5 s</option>
+        <option value="10">10 s</option>
+      </select>
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Scatti in raffica</span><span class="num" id="manualBurstCountVal">1</span></div>
+      <input type="range" id="manualBurstCount" min="1" max="10" value="1">
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Intervallo raffica</span><span class="num" id="manualBurstIntervalVal">0 ms</span></div>
+      <input type="range" id="manualBurstInterval" min="0" max="500" value="0" step="10">
+    </div>
+  </div>
+
   <div class="eyebrow">Esposimetro live</div>
   <div class="panel">
     <div class="field-row">
       <span class="name">Luminosità rilevata</span>
       <span class="num" id="meterBrightnessSheet" style="font-family:var(--font-display);font-weight:600;">—</span>
     </div>
+    <canvas id="histogramCanvas" width="280" height="52" style="width:100%; height:52px; display:block; margin:2px 0 12px; border-radius:8px; background:var(--panel-2);"></canvas>
     <div class="ctrl">
       <div class="ctrl-head"><span class="name">Obiettivo / apertura</span></div>
       <select id="meterLens" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);width:100%;">
@@ -524,6 +596,8 @@
       <div class="vf-shutter-row">
         <button class="shutter-btn" id="cameraShootBtn">SCATTA</button>
       </div>
+
+      <div class="countdown-overlay hidden-panel" id="countdownOverlay">3</div>
     </div>
   </div>
 
@@ -536,6 +610,17 @@
       <div class="flash-flag" id="flashFlag">LAMPO</div>
       <div class="trace-shade"></div>
       <canvas id="traceCanvas" class="trace-canvas"></canvas>
+    </div>
+  </div>
+
+  <div class="screen" data-screen="motion" id="screen-motion">
+    <div class="viewfinder">
+      <video id="videoMotion" autoplay muted playsinline></video>
+      <div class="readout"><span class="lbl">movim.</span><span id="motionValue">0.0</span></div>
+      <button class="gear-fab" id="motionGearBtn">⚙</button>
+      <div class="flash-flag" id="motionFlag" style="background:rgba(139,195,74,0.2); color:var(--wild); border-color:rgba(139,195,74,0.4);">MOVIMENTO</div>
+      <div class="trace-shade"></div>
+      <canvas id="motionTraceCanvas" class="trace-canvas"></canvas>
     </div>
   </div>
 
@@ -606,6 +691,7 @@
     <button class="mode-pill active" data-screen="flash">FLASH</button>
     <button class="mode-pill" data-screen="interval">INTERVALLO</button>
     <button class="mode-pill" data-screen="sun">ALBA/TRAMONTO</button>
+    <button class="mode-pill" data-screen="motion">ANIMALI</button>
   </div>
   <div class="shutter-row">
     <button class="shutter-btn" id="shutterBtn">ARMA</button>
@@ -641,6 +727,20 @@ const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const luxValue = document.getElementById('luxValue');
 const flashFlag = document.getElementById('flashFlag');
+const motionValue = document.getElementById('motionValue');
+const motionFlag = document.getElementById('motionFlag');
+const motionThresholdEl = document.getElementById('motionThreshold');
+const motionThresholdVal = document.getElementById('motionThresholdVal');
+const motionDelayEl = document.getElementById('motionDelay');
+const motionDelayVal = document.getElementById('motionDelayVal');
+const motionCooldownEl = document.getElementById('motionCooldown');
+const motionCooldownVal = document.getElementById('motionCooldownVal');
+const motionBurstCountEl = document.getElementById('motionBurstCount');
+const motionBurstCountVal = document.getElementById('motionBurstCountVal');
+const motionBurstIntervalEl = document.getElementById('motionBurstInterval');
+const motionBurstIntervalVal = document.getElementById('motionBurstIntervalVal');
+const motionTraceCanvas = document.getElementById('motionTraceCanvas');
+const motionTctx = motionTraceCanvas.getContext('2d');
 const logEl = document.getElementById('log');
 
 const statsToday = document.getElementById('statsToday');
@@ -671,6 +771,9 @@ const cameraConnectBtn = document.getElementById('cameraConnectBtn');
 
 let mode = 'flash';
 let armed = false;
+let motionArmed = false;
+let lastMotionTrigger = 0;
+let prevFrameLum = null; // griglia campionata del frame precedente, per il confronto
 let baseline = null;
 let lastTrigger = 0;
 let traceBuffer = [];
@@ -684,6 +787,10 @@ let countdownTimer = null;
 
 // ---------- filtro scena intelligente ----------
 const GRID_COLS = 4, GRID_ROWS = 3;
+const HIST_BINS = 48;
+const MOTION_COLS = 16, MOTION_ROWS = 12;
+const MOTION_CELLS = MOTION_COLS * MOTION_ROWS;
+let motionTraceBuffer = [];
 const ZONE_COUNT = GRID_COLS * GRID_ROWS;
 let zoneBaseline = new Array(ZONE_COUNT).fill(null);
 let prevDelta = 0;
@@ -923,6 +1030,56 @@ function formatShutter(sec) {
   return sec < 1 ? `1/${Math.round(1 / sec)} s` : `${sec.toFixed(1)} s`;
 }
 
+const histogramCanvas = document.getElementById('histogramCanvas');
+const histogramCtx = histogramCanvas.getContext('2d');
+function drawHistogram(counts) {
+  const w = histogramCanvas.width, h = histogramCanvas.height;
+  histogramCtx.clearRect(0, 0, w, h);
+  const maxCount = Math.max(...counts, 1);
+  const barW = w / HIST_BINS;
+  histogramCtx.fillStyle = '#57D6C4';
+  for (let i = 0; i < HIST_BINS; i++) {
+    const barH = (counts[i] / maxCount) * (h - 2);
+    histogramCtx.fillRect(i * barW, h - barH, Math.max(1, barW - 1), barH);
+  }
+}
+
+// ---------- autoscatto + raffica sul pulsante di scatto manuale ----------
+const selfTimerSelect = document.getElementById('selfTimerSelect');
+const manualBurstCountEl = document.getElementById('manualBurstCount');
+const manualBurstCountVal = document.getElementById('manualBurstCountVal');
+const manualBurstIntervalEl = document.getElementById('manualBurstInterval');
+const manualBurstIntervalVal = document.getElementById('manualBurstIntervalVal');
+const countdownOverlay = document.getElementById('countdownOverlay');
+
+selfTimerSelect.value = localStorage.getItem('ft_self_timer') || '0';
+manualBurstCountEl.value = localStorage.getItem('ft_manual_burst_count') || 1;
+manualBurstIntervalEl.value = localStorage.getItem('ft_manual_burst_interval') || 0;
+manualBurstCountVal.textContent = manualBurstCountEl.value;
+manualBurstIntervalVal.textContent = manualBurstIntervalEl.value + ' ms';
+
+selfTimerSelect.onchange = () => localStorage.setItem('ft_self_timer', selfTimerSelect.value);
+manualBurstCountEl.oninput = () => { manualBurstCountVal.textContent = manualBurstCountEl.value; localStorage.setItem('ft_manual_burst_count', manualBurstCountEl.value); };
+manualBurstIntervalEl.oninput = () => { manualBurstIntervalVal.textContent = manualBurstIntervalEl.value + ' ms'; localStorage.setItem('ft_manual_burst_interval', manualBurstIntervalEl.value); };
+
+function runCountdown(seconds) {
+  return new Promise(resolve => {
+    countdownOverlay.classList.remove('hidden-panel');
+    let remaining = seconds;
+    countdownOverlay.textContent = remaining;
+    const timer = setInterval(() => {
+      remaining--;
+      if (remaining <= 0) {
+        clearInterval(timer);
+        countdownOverlay.classList.add('hidden-panel');
+        resolve();
+      } else {
+        countdownOverlay.textContent = remaining;
+      }
+    }, 1000);
+  });
+}
+
 function updateMeterDisplay() {
   const shutterLabel = formatShutter(computeSuggestedShutter());
   meterBrightnessEl.textContent = currentBrightness.toFixed(1);
@@ -965,29 +1122,48 @@ async function sonyApiCall(method, params = []) {
   const res = await fetch(`${base}/sony/camera`, {
     method: 'POST',
     body: JSON.stringify({ method, params, id: 1, version: '1.0' }),
+    signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
 wifiTestBtn.onclick = async () => {
+  wifiHint.textContent = 'Verifica in corso… (fino a 8s prima di arrendersi)';
+  wifiTestBtn.disabled = true;
   log('ok', 'Verifica WiFi in corso…');
   try {
     const data = await sonyApiCall('getAvailableApiList');
+    const msg = 'Risponde! Il pulsante "Scatta via WiFi" dovrebbe funzionare.';
+    wifiHint.textContent = msg;
     log('ok', 'Fotocamera raggiunta via WiFi: ' + JSON.stringify(data).slice(0, 300));
-    wifiHint.textContent = 'Risponde! Il pulsante "Scatta via WiFi" dovrebbe funzionare.';
   } catch (e) {
-    log('error', 'WiFi non raggiungibile: ' + e.message + ' — probabile modello non supportato o blocco CORS del browser');
+    const reason = e.name === 'TimeoutError' || e.name === 'AbortError'
+      ? 'nessuna risposta entro 8s — indirizzo/porta sbagliati, o il modello non supporta questa API'
+      : e.message + ' — probabile blocco CORS del browser';
+    wifiHint.textContent = 'Verifica fallita: ' + reason;
+    log('error', 'WiFi non raggiungibile: ' + reason);
+  } finally {
+    wifiTestBtn.disabled = false;
   }
 };
 
 wifiShootBtn.onclick = async () => {
+  wifiHint.textContent = 'Scatto in corso…';
+  wifiShootBtn.disabled = true;
   log('trigger', 'Scatto via WiFi…');
   try {
     const data = await sonyApiCall('actTakePicture');
+    wifiHint.textContent = 'Scatto riuscito.';
     log('ok', 'Scatto WiFi riuscito: ' + JSON.stringify(data).slice(0, 300));
   } catch (e) {
-    log('error', 'Scatto WiFi fallito: ' + e.message + ' — controlla comunque se la fotocamera ha scattato: il comando può arrivare anche quando il browser non riesce a leggere la risposta');
+    const reason = e.name === 'TimeoutError' || e.name === 'AbortError'
+      ? 'nessuna risposta entro 8s'
+      : e.message;
+    wifiHint.textContent = 'Scatto fallito (' + reason + ') — controlla comunque se la fotocamera ha scattato lo stesso.';
+    log('error', 'Scatto WiFi fallito: ' + reason + ' — il comando può essere arrivato anche se la risposta non si legge');
+  } finally {
+    wifiShootBtn.disabled = false;
   }
 };
 
@@ -1055,8 +1231,8 @@ const screens = document.querySelectorAll('.screen');
 const headerTitle = document.getElementById('headerTitle');
 const headerDot = document.getElementById('headerDot');
 
-const SCREEN_LABELS = { flash: 'Flash', interval: 'Intervallo', sun: 'Alba/Tramonto', stats: 'Statistiche', log: 'Registro eventi', camera: 'Fotocamera' };
-const SCREEN_DOT_COLOR = { flash: 'var(--live)', interval: 'var(--trace)', sun: 'var(--accent)', stats: 'var(--muted-2)', log: 'var(--muted-2)', camera: 'var(--accent)' };
+const SCREEN_LABELS = { flash: 'Flash', interval: 'Intervallo', sun: 'Alba/Tramonto', motion: 'Animali', stats: 'Statistiche', log: 'Registro eventi', camera: 'Fotocamera' };
+const SCREEN_DOT_COLOR = { flash: 'var(--live)', interval: 'var(--trace)', sun: 'var(--accent)', motion: 'var(--wild)', stats: 'var(--muted-2)', log: 'var(--muted-2)', camera: 'var(--accent)' };
 
 function openMenu() { overlay.classList.add('open'); drawer.classList.add('open'); }
 function closeMenu() { overlay.classList.remove('open'); drawer.classList.remove('open'); }
@@ -1070,13 +1246,13 @@ function goToScreen(name) {
   modePills.forEach(p => p.classList.toggle('active', p.dataset.screen === name));
   headerTitle.textContent = SCREEN_LABELS[name];
   headerDot.style.background = SCREEN_DOT_COLOR[name];
-  if (['flash', 'interval', 'sun'].includes(name)) mode = name;
+  if (['flash', 'interval', 'sun', 'motion'].includes(name)) mode = name;
 
-  const isShootingMode = ['flash', 'interval', 'sun'].includes(name);
+  const isShootingMode = ['flash', 'interval', 'sun', 'motion'].includes(name);
   controlBar.style.display = isShootingMode ? 'block' : 'none';
-  controlBar.classList.toggle('on-viewfinder', name === 'flash');
-  controlBar.classList.toggle('docked', isShootingMode && name !== 'flash');
-  mainHeader.classList.toggle('overlay-header', name === 'flash' || name === 'camera');
+  controlBar.classList.toggle('on-viewfinder', name === 'flash' || name === 'motion');
+  controlBar.classList.toggle('docked', isShootingMode && name !== 'flash' && name !== 'motion');
+  mainHeader.classList.toggle('overlay-header', name === 'flash' || name === 'camera' || name === 'motion');
 
   if (name === 'stats') refreshStats();
   updateShutterUI();
@@ -1102,6 +1278,14 @@ function openCameraSheet() { cameraSheet.classList.add('open'); cameraSheetOverl
 function closeCameraSheet() { cameraSheet.classList.remove('open'); cameraSheetOverlay.classList.remove('open'); }
 cameraGearBtn.onclick = openCameraSheet;
 cameraSheetOverlay.onclick = closeCameraSheet;
+
+const motionSheet = document.getElementById('motionSheet');
+const motionSheetOverlay = document.getElementById('motionSheetOverlay');
+const motionGearBtn = document.getElementById('motionGearBtn');
+function openMotionSheet() { motionSheet.classList.add('open'); motionSheetOverlay.classList.add('open'); }
+function closeMotionSheet() { motionSheet.classList.remove('open'); motionSheetOverlay.classList.remove('open'); }
+motionGearBtn.onclick = openMotionSheet;
+motionSheetOverlay.onclick = closeMotionSheet;
 
 // ---------- griglia di composizione ----------
 const gridToggleBtn = document.getElementById('gridToggleBtn');
@@ -1186,8 +1370,11 @@ const cameraShootBtn = document.getElementById('cameraShootBtn');
 cameraShootBtn.onclick = async () => {
   if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
   cameraShootBtn.disabled = true;
-  const result = await fireShutter(1, 0);
+  const timerSec = parseInt(selfTimerSelect.value, 10);
+  if (timerSec > 0) await runCountdown(timerSec);
+  const result = await fireShutter(parseInt(manualBurstCountEl.value, 10), parseInt(manualBurstIntervalEl.value, 10));
   log(result.ok ? 'ok' : 'error', result.message);
+  if (result.ok) recordFlashEventSilent();
   cameraShootBtn.disabled = false;
 };
 
@@ -1228,6 +1415,28 @@ cooldownEl.oninput = () => { syncLabels(); localStorage.setItem('ft_cooldown', c
 burstCountEl.oninput = () => { syncLabels(); localStorage.setItem('ft_burst_count', burstCountEl.value); };
 burstIntervalEl.oninput = () => { syncLabels(); localStorage.setItem('ft_burst_interval', burstIntervalEl.value); };
 
+// ---------- persistenza controlli Animali ----------
+motionThresholdEl.value = localStorage.getItem('ft_motion_threshold') || 35;
+motionDelayEl.value = localStorage.getItem('ft_motion_delay') || 0;
+motionCooldownEl.value = localStorage.getItem('ft_motion_cooldown') || 3000;
+motionBurstCountEl.value = localStorage.getItem('ft_motion_burst_count') || 3;
+motionBurstIntervalEl.value = localStorage.getItem('ft_motion_burst_interval') || 200;
+
+function syncMotionLabels() {
+  motionThresholdVal.textContent = motionThresholdEl.value;
+  motionDelayVal.textContent = motionDelayEl.value + ' ms';
+  motionCooldownVal.textContent = (motionCooldownEl.value / 1000).toFixed(1) + ' s';
+  motionBurstCountVal.textContent = motionBurstCountEl.value;
+  motionBurstIntervalVal.textContent = motionBurstIntervalEl.value + ' ms';
+}
+syncMotionLabels();
+
+motionThresholdEl.oninput = () => { syncMotionLabels(); localStorage.setItem('ft_motion_threshold', motionThresholdEl.value); };
+motionDelayEl.oninput = () => { syncMotionLabels(); localStorage.setItem('ft_motion_delay', motionDelayEl.value); };
+motionCooldownEl.oninput = () => { syncMotionLabels(); localStorage.setItem('ft_motion_cooldown', motionCooldownEl.value); };
+motionBurstCountEl.oninput = () => { syncMotionLabels(); localStorage.setItem('ft_motion_burst_count', motionBurstCountEl.value); };
+motionBurstIntervalEl.oninput = () => { syncMotionLabels(); localStorage.setItem('ft_motion_burst_interval', motionBurstIntervalEl.value); };
+
 function log(kind, text) {
   const time = new Date().toLocaleTimeString('it-IT', { hour12: false }) + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
   const row = document.createElement('div');
@@ -1245,6 +1454,13 @@ function resizeTrace() {
   traceCanvas.height = rect.height * devicePixelRatio;
 }
 
+function resizeMotionTrace() {
+  const rect = motionTraceCanvas.getBoundingClientRect();
+  if (rect.width === 0) return;
+  motionTraceCanvas.width = rect.width * devicePixelRatio;
+  motionTraceCanvas.height = rect.height * devicePixelRatio;
+}
+
 async function startCamPreview() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -1257,14 +1473,21 @@ async function startCamPreview() {
       videoCamera.srcObject = stream; // stesso stream, seconda anteprima nella schermata Fotocamera
       videoCamera.play().catch(() => {});
     }
+    const videoMotionEl = document.getElementById('videoMotion');
+    if (videoMotionEl) {
+      videoMotionEl.srcObject = stream; // stesso stream, terza anteprima nella schermata Animali
+      videoMotionEl.play().catch(() => {});
+    }
     analyzeCanvas.width = 160; analyzeCanvas.height = 120;
     resizeTrace();
+    resizeMotionTrace();
     requestAnimationFrame(analyzeLoop);
   } catch (e) {
     log('error', 'Fotocamera del telefono non disponibile: ' + e.message);
   }
 }
 window.addEventListener('resize', resizeTrace);
+window.addEventListener('resize', resizeMotionTrace);
 
 function drawTrace() {
   const w = traceCanvas.width, h = traceCanvas.height;
@@ -1292,6 +1515,32 @@ function drawTrace() {
   tctx.stroke();
 }
 
+function drawMotionTrace() {
+  const w = motionTraceCanvas.width, h = motionTraceCanvas.height;
+  if (!w || !h) return;
+  motionTctx.clearRect(0, 0, w, h);
+  const threshold = parseFloat(motionThresholdEl.value);
+  const scaleMax = 60;
+  const thY = h - (threshold / scaleMax) * h;
+  motionTctx.strokeStyle = 'rgba(139,195,74,0.45)';
+  motionTctx.setLineDash([4 * devicePixelRatio, 4 * devicePixelRatio]);
+  motionTctx.lineWidth = 1 * devicePixelRatio;
+  motionTctx.beginPath(); motionTctx.moveTo(0, thY); motionTctx.lineTo(w, thY); motionTctx.stroke();
+  motionTctx.setLineDash([]);
+
+  if (motionTraceBuffer.length < 2) return;
+  const stepX = w / (TRACE_LEN - 1);
+  motionTctx.strokeStyle = '#8BC34A';
+  motionTctx.lineWidth = 1.6 * devicePixelRatio;
+  motionTctx.beginPath();
+  motionTraceBuffer.forEach((v, i) => {
+    const x = i * stepX;
+    const y = h - Math.min(1, v / scaleMax) * h;
+    i === 0 ? motionTctx.moveTo(x, y) : motionTctx.lineTo(x, y);
+  });
+  motionTctx.stroke();
+}
+
 function analyzeLoop() {
   if (video.readyState >= 2) {
     actx.drawImage(video, 0, 0, analyzeCanvas.width, analyzeCanvas.height);
@@ -1300,6 +1549,10 @@ function analyzeLoop() {
     const zoneW = w / GRID_COLS, zoneH = h / GRID_ROWS;
     const zoneSums = new Array(ZONE_COUNT).fill(0);
     const zoneCounts = new Array(ZONE_COUNT).fill(0);
+    const histCounts = new Array(HIST_BINS).fill(0);
+    const motionSums = new Array(MOTION_CELLS).fill(0);
+    const motionCounts = new Array(MOTION_CELLS).fill(0);
+    const motionCellW = w / MOTION_COLS, motionCellH = h / MOTION_ROWS;
     let sum = 0, count = 0;
     const step = 16;
 
@@ -1313,6 +1566,11 @@ function analyzeLoop() {
       const zy = Math.min(GRID_ROWS - 1, Math.floor(y / zoneH));
       const zi = zy * GRID_COLS + zx;
       zoneSums[zi] += lum; zoneCounts[zi]++;
+      histCounts[Math.min(HIST_BINS - 1, Math.floor(lum / 256 * HIST_BINS))]++;
+      const mx = Math.min(MOTION_COLS - 1, Math.floor(x / motionCellW));
+      const my = Math.min(MOTION_ROWS - 1, Math.floor(y / motionCellH));
+      const mi = my * MOTION_COLS + mx;
+      motionSums[mi] += lum; motionCounts[mi]++;
     }
 
     const avg = sum / count / 255 * 100;
@@ -1331,6 +1589,8 @@ function analyzeLoop() {
     }
     const uniformity = activeZones / ZONE_COUNT;
     if (mode === 'flash') uniformityValue.textContent = delta > 1 ? Math.round(uniformity * 100) + '%' : '—';
+
+    if (document.getElementById('screen-camera').classList.contains('active')) drawHistogram(histCounts);
 
     traceBuffer.push(delta);
     if (traceBuffer.length > TRACE_LEN) traceBuffer.shift();
@@ -1353,6 +1613,30 @@ function analyzeLoop() {
       }
     }
     prevDelta = delta;
+
+    // --- rilevamento movimento (modalità Animali) ---
+    const motionGridNow = new Array(MOTION_CELLS);
+    let motionDiffSum = 0;
+    for (let ci = 0; ci < MOTION_CELLS; ci++) {
+      const cAvg = motionCounts[ci] ? (motionSums[ci] / motionCounts[ci] / 255 * 100) : 0;
+      motionGridNow[ci] = cAvg;
+      if (prevFrameLum) motionDiffSum += Math.abs(cAvg - prevFrameLum[ci]);
+    }
+    const motionScore = prevFrameLum ? (motionDiffSum / MOTION_CELLS) * 3 : 0;
+    prevFrameLum = motionGridNow;
+    motionValue.textContent = motionScore.toFixed(1);
+
+    motionTraceBuffer.push(motionScore);
+    if (motionTraceBuffer.length > TRACE_LEN) motionTraceBuffer.shift();
+    if (document.getElementById('screen-motion').classList.contains('active')) drawMotionTrace();
+
+    const motionThreshold = parseFloat(motionThresholdEl.value);
+    const motionCooldown = parseFloat(motionCooldownEl.value);
+    if (motionScore >= motionThreshold && now - lastMotionTrigger > motionCooldown) {
+      motionFlag.classList.add('show');
+      setTimeout(() => motionFlag.classList.remove('show'), 260);
+      if (motionArmed) { lastMotionTrigger = now; onMotionDetected(); }
+    }
   }
   requestAnimationFrame(analyzeLoop);
 }
@@ -1365,6 +1649,16 @@ async function onFlashDetected() {
   const result = await fireShutter(parseInt(burstCountEl.value, 10), parseInt(burstIntervalEl.value, 10));
   log(result.ok ? 'ok' : 'error', result.message);
   if (result.ok) recordFlashEvent();
+}
+
+async function onMotionDetected() {
+  if (!cameraConnected) { log('error', 'Fotocamera non connessa'); return; }
+  log('trigger', 'Movimento rilevato → scatto');
+  const delayMs = parseInt(motionDelayEl.value, 10);
+  if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
+  const result = await fireShutter(parseInt(motionBurstCountEl.value, 10), parseInt(motionBurstIntervalEl.value, 10));
+  log(result.ok ? 'ok' : 'error', result.message);
+  if (result.ok) recordFlashEventSilent();
 }
 
 // ---------- badge nel drawer ----------
@@ -1382,6 +1676,10 @@ function updateBadges() {
   const sActive = scheduleActive && scheduleMode === 'sun';
   bS.textContent = sActive ? 'ATTIVO' : '';
   bS.className = 'badge' + (sActive ? ' on-sun' : '');
+
+  const bM = document.getElementById('badgeMotion');
+  bM.textContent = motionArmed ? 'ARMATO' : '';
+  bM.className = 'badge' + (motionArmed ? ' on-motion' : '');
 }
 
 // ---------- pulsante di scatto unico ----------
@@ -1400,6 +1698,10 @@ function updateShutterUI() {
     shutterBtn.textContent = active ? 'STOP' : 'AVVIA';
     shutterBtn.classList.toggle('armed', active);
     hintEl.textContent = active ? '' : "Serve la posizione GPS prima di programmare";
+  } else if (mode === 'motion') {
+    shutterBtn.textContent = motionArmed ? 'STOP' : 'ARMA';
+    shutterBtn.classList.toggle('armed', motionArmed);
+    hintEl.textContent = motionArmed ? 'Armato — scatta al prossimo movimento rilevato' : 'Punta il telefono verso la zona da sorvegliare, poi attiva';
   }
   updateBadges();
 }
@@ -1414,6 +1716,11 @@ shutterBtn.onclick = () => {
     if (scheduleActive && scheduleMode === 'interval') stopSchedule(); else startInterval();
   } else if (mode === 'sun') {
     if (scheduleActive && scheduleMode === 'sun') stopSchedule(); else startSun();
+  } else if (mode === 'motion') {
+    if (!cameraConnected) { log('error', 'Connetti prima la fotocamera (menu → Fotocamera)'); return; }
+    motionArmed = !motionArmed;
+    log(motionArmed ? 'trigger' : 'ok', motionArmed ? 'Sistema armato (movimento)' : 'Sistema disattivato');
+    updateShutterUI();
   }
 };
 
