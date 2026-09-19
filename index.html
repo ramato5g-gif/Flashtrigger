@@ -170,6 +170,11 @@
     background: rgba(0,0,0,0.45); padding: 3px 9px; border-radius: 10px;
   }
 
+  .overlay-canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 2;
+  }
+
   .vf-shutter-row {
     position: absolute; left: 0; right: 0; bottom: max(36px, calc(env(safe-area-inset-bottom) + 24px));
     display: flex; justify-content: center; z-index: 3;
@@ -516,6 +521,43 @@
     <p class="log-empty" id="meterHint" style="padding:10px 0 4px; text-align:left;">Non calibrato — imposta un'esposizione che sai corretta sulla fotocamera, inserisci qui lo stesso tempo, poi tocca "Calibra qui".</p>
   </div>
 
+  <div class="eyebrow">Stelle puntiformi</div>
+  <div class="panel">
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Lunghezza focale (mm)</span><span class="num" id="starFocalVal">12</span></div>
+      <input type="range" id="starFocal" min="8" max="200" value="12">
+    </div>
+    <div class="field-row">
+      <span class="name">Regola</span>
+      <select id="starRule" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);">
+        <option value="500">500 (più permissiva)</option>
+        <option value="300">300 (più rigorosa)</option>
+      </select>
+    </div>
+    <div class="field-row">
+      <span class="name">Tempo massimo prima delle scie</span>
+      <span class="num" id="starMaxShutter" style="font-family:var(--font-display);font-weight:700;font-size:17px;color:var(--accent);">—</span>
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">ISO</span><span class="num" id="starIsoVal">3200</span></div>
+      <input type="range" id="starIso" min="100" max="12800" value="3200" step="100">
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Apertura</span></div>
+      <select id="starAperture" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);width:100%;">
+        <option value="2">Samyang 12mm F2.0 (fisso f/2)</option>
+        <option value="3.5">Sony 18-135mm — f/3.5 (grandangolo)</option>
+        <option value="4.5">Sony 18-135mm — f/4.5 (medio)</option>
+        <option value="5.6">Sony 18-135mm — f/5.6 (tele)</option>
+      </select>
+    </div>
+    <div class="field-row">
+      <span class="name">Applica alla fotocamera</span>
+      <button class="btn-ghost" id="starApplyBtn">Applica</button>
+    </div>
+    <p class="log-empty" style="padding:10px 0 4px; text-align:left;">Stima approssimata per sensore APS-C (fattore di crop 1.5×, come la tua A6100). Oltre questo tempo le stelle iniziano a lasciare scie visibili.</p>
+  </div>
+
   <div class="eyebrow">Impostazioni manuali</div>
   <div class="panel">
     <div class="field-row">
@@ -585,11 +627,16 @@
         <div class="level-deg" id="levelDeg">0.0°</div>
       </div>
 
+      <canvas class="overlay-canvas hidden-panel" id="zebraCanvas"></canvas>
+      <canvas class="overlay-canvas hidden-panel" id="peakingCanvas"></canvas>
+
       <div class="readout"><span class="lbl">Luce</span><span id="meterBrightness">—</span><span class="lbl" style="margin-left:8px;">posa</span><span id="meterShutterOverlay">—</span></div>
 
       <div class="viewfinder-tools">
         <button class="icon-btn-vf" id="gridToggleBtn">▦</button>
         <button class="icon-btn-vf" id="levelToggleBtn">◐</button>
+        <button class="icon-btn-vf" id="zebraToggleBtn">▤</button>
+        <button class="icon-btn-vf" id="peakingToggleBtn">◈</button>
         <button class="icon-btn-vf" id="cameraGearBtn">⚙</button>
       </div>
 
@@ -638,7 +685,85 @@
         <span class="name">Durata max minuti (0 = nessuna)</span>
         <input type="text" id="intervalDuration" inputmode="numeric" value="0">
       </div>
+      <div class="field-row">
+        <span class="name">Partenza ritardata (minuti, 0 = subito)</span>
+        <input type="text" id="intervalStartDelay" inputmode="numeric" value="0" style="width:70px;">
+      </div>
+      <div class="field-row">
+        <span class="name">Esposizione automatica (segue la luce)</span>
+        <button class="btn-ghost" id="rampingToggle">Off</button>
+      </div>
+      <p class="log-empty" id="rampingHint" style="padding:8px 0 2px; text-align:left; display:none;">Regola il tempo di posa ad ogni scatto in base alla luce rilevata — richiede di aver calibrato l'esposimetro in Fotocamera prima di avviare.</p>
+      <div class="field-row">
+        <span class="name">Torcia (illumina il primo piano)</span>
+        <button class="btn-ghost" id="torchToggle">Off</button>
+      </div>
       <div class="schedule-status" id="intervalStatus">In attesa di avvio</div>
+    </div>
+
+    <div class="eyebrow">Calcolatore timelapse</div>
+    <div class="panel">
+      <div class="ctrl">
+        <div class="ctrl-head"><span class="name">Fotogrammi al secondo del video</span></div>
+        <select id="timelapseFps" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);width:100%;">
+          <option value="24">24 fps (cinema)</option>
+          <option value="25" selected>25 fps (PAL)</option>
+          <option value="30">30 fps</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <span class="name">Scatti totali</span>
+        <span class="num" id="timelapseShots" style="font-family:var(--font-display);font-weight:600;">—</span>
+      </div>
+      <div class="field-row">
+        <span class="name">Durata video risultante</span>
+        <span class="num" id="timelapseDuration" style="font-family:var(--font-display);font-weight:700;color:var(--trace);">—</span>
+      </div>
+      <p class="log-empty" id="timelapseHint" style="padding:10px 0 4px; text-align:left;">Imposta un numero di scatti o una durata massima (non entrambi a 0) per vedere quanto durerà il video finale.</p>
+    </div>
+
+    <div class="eyebrow">Preset scie stellari</div>
+    <div class="panel">
+      <div class="ctrl">
+        <div class="ctrl-head"><span class="name">Esposizione singola</span><span class="num" id="startrailExposureVal">20 s</span></div>
+        <input type="range" id="startrailExposure" min="10" max="30" value="20">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-head"><span class="name">Durata totale sessione</span><span class="num" id="startrailHoursVal">1.0 h</span></div>
+        <input type="range" id="startrailHours" min="0.5" max="6" value="1" step="0.5">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-head"><span class="name">ISO</span><span class="num" id="startrailIsoVal">1600</span></div>
+        <input type="range" id="startrailIso" min="100" max="6400" value="1600" step="100">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-head"><span class="name">Apertura</span></div>
+        <select id="startrailAperture" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);width:100%;">
+          <option value="2">Samyang 12mm F2.0 (fisso f/2)</option>
+          <option value="3.5">Sony 18-135mm — f/3.5 (grandangolo)</option>
+          <option value="4.5">Sony 18-135mm — f/4.5 (medio)</option>
+          <option value="5.6">Sony 18-135mm — f/5.6 (tele)</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <span class="name">Scatti necessari</span>
+        <span class="num" id="startrailShots" style="font-family:var(--font-display);font-weight:600;">—</span>
+      </div>
+      <div class="field-row">
+        <span class="name">Rotazione celeste stimata</span>
+        <span class="num" id="startrailDegrees" style="font-family:var(--font-display);font-weight:700;color:var(--trace);">—</span>
+      </div>
+      <div class="field-row">
+        <span class="name">Applica a Intervallo</span>
+        <button class="btn-ghost" id="startrailApplyBtn">Applica</button>
+      </div>
+      <p class="log-empty" style="padding:10px 0 4px; text-align:left;">
+        Scatti consecutivi senza pause (intervallo = esposizione), per
+        scie continue senza "buchi". Le singole foto restano sulla scheda
+        SD: per unirle in un'unica scia dopo lo scatto serve un software
+        di stacking (es. StarStaX, Sequator) — questa app prepara solo la
+        sequenza di scatto.
+      </p>
     </div>
   </div>
 
@@ -660,6 +785,11 @@
         <button class="btn-ghost" id="gpsBtn">Usa GPS</button>
       </div>
       <div class="schedule-status" id="sunStatus">Posizione non ancora rilevata</div>
+    </div>
+
+    <div class="eyebrow">Ora dorata e ora blu</div>
+    <div class="panel" id="lightWindowsPanel">
+      <p class="log-empty" style="padding:16px 0;">Rileva la posizione GPS sopra per calcolare le finestre di luce.</p>
     </div>
   </div>
 
@@ -1030,6 +1160,43 @@ function formatShutter(sec) {
   return sec < 1 ? `1/${Math.round(1 / sec)} s` : `${sec.toFixed(1)} s`;
 }
 
+// ---------- regola 500/300 per stelle puntiformi ----------
+const starFocalEl = document.getElementById('starFocal');
+const starFocalVal = document.getElementById('starFocalVal');
+const starRuleEl = document.getElementById('starRule');
+const starMaxShutterEl = document.getElementById('starMaxShutter');
+const starIsoEl = document.getElementById('starIso');
+const starIsoVal = document.getElementById('starIsoVal');
+const starApertureEl = document.getElementById('starAperture');
+const starApplyBtn = document.getElementById('starApplyBtn');
+const APSC_CROP_FACTOR = 1.5; // A6100
+let starMaxSec = null;
+
+function updateStarCalc() {
+  const focal = parseFloat(starFocalEl.value);
+  const ruleNum = parseFloat(starRuleEl.value);
+  starMaxSec = ruleNum / (focal * APSC_CROP_FACTOR);
+  starMaxShutterEl.textContent = starMaxSec.toFixed(1) + ' s';
+}
+starFocalEl.oninput = () => { starFocalVal.textContent = starFocalEl.value; updateStarCalc(); };
+starRuleEl.onchange = updateStarCalc;
+starIsoEl.oninput = () => { starIsoVal.textContent = starIsoEl.value; };
+updateStarCalc();
+
+starApplyBtn.onclick = async () => {
+  if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
+  const iso = parseInt(starIsoEl.value, 10);
+  const aperture = parseFloat(starApertureEl.value);
+  try {
+    await camera.setConfigValue('iso', String(iso));
+    await camera.setConfigValue('aperture', String(aperture));
+    await camera.setConfigValue('shutterspeed', starMaxSec.toFixed(1));
+    log('ok', `Applicato alla fotocamera: f/${aperture}, ISO ${iso}, ${starMaxSec.toFixed(1)}s`);
+  } catch (e) {
+    log('error', 'Errore applicando le impostazioni: ' + e.message + ' — imposta a mano da "Impostazioni manuali"');
+  }
+};
+
 const histogramCanvas = document.getElementById('histogramCanvas');
 const histogramCtx = histogramCanvas.getContext('2d');
 function drawHistogram(counts) {
@@ -1094,13 +1261,15 @@ meterApplyBtn.onclick = async () => {
   const shutterSec = computeSuggestedShutter();
   if (shutterSec == null) { log('error', "Calibra prima l'esposimetro"); return; }
   const isoChosen = parseFloat(meterIsoEl.value);
+  const apertureChosen = parseFloat(meterLensEl.value);
   const shutterLabel = shutterSec < 1 ? `1/${Math.round(1 / shutterSec)}` : shutterSec.toFixed(1);
   try {
     await camera.setConfigValue('iso', String(isoChosen));
+    await camera.setConfigValue('aperture', String(apertureChosen));
     await camera.setConfigValue('shutterspeed', shutterLabel);
-    log('ok', `Applicato alla fotocamera: ISO ${isoChosen}, ${shutterLabel}s`);
+    log('ok', `Applicato alla fotocamera: f/${apertureChosen}, ISO ${isoChosen}, ${shutterLabel}s`);
   } catch (e) {
-    log('error', 'Errore applicando le impostazioni: ' + e.message + ' — se i nomi campo non coincidono, imposta a mano da "Impostazioni manuali" qui sotto');
+    log('error', 'Errore applicando le impostazioni: ' + e.message + ' — se i nomi campo non coincidono, imposta a mano da "Impostazioni manuali" qui sotto (l\'apertura potrebbe non essere impostabile via USB su tutti gli obiettivi — se fallisce, regolala a mano dalla fotocamera)');
   }
 };
 
@@ -1365,8 +1534,124 @@ levelToggleBtn.onclick = () => {
 };
 if (levelOn) startLevelSensor();
 
+// --------------------------------------------------------------------
+// ZEBRA e FOCUS PEAKING — overlay ricalcolati periodicamente (non ad ogni
+// fotogramma: qui la fluidità perfetta conta meno della leggerezza) sopra
+// il video della schermata Fotocamera. Il ritaglio del frame replica
+// manualmente object-fit:cover, altrimenti le zone segnalate non
+// coinciderebbero con quello che si vede davvero a schermo.
+// --------------------------------------------------------------------
+const zebraToggleBtn = document.getElementById('zebraToggleBtn');
+const videoCameraEl = document.getElementById('videoCamera');
+const zebraCanvas = document.getElementById('zebraCanvas');
+const zebraCtx = zebraCanvas.getContext('2d');
+const peakingToggleBtn = document.getElementById('peakingToggleBtn');
+const peakingCanvas = document.getElementById('peakingCanvas');
+const peakingCtx = peakingCanvas.getContext('2d');
+
+let zebraOn = localStorage.getItem('ft_zebra_on') === '1';
+let peakingOn = localStorage.getItem('ft_peaking_on') === '1';
+const OVERLAY_WORK_W = 240; // risoluzione di lavoro: basta per un overlay leggibile, resta leggero
+
+function applyZebraPeakingUI() {
+  zebraCanvas.classList.toggle('hidden-panel', !zebraOn);
+  zebraToggleBtn.classList.toggle('active', zebraOn);
+  peakingCanvas.classList.toggle('hidden-panel', !peakingOn);
+  peakingToggleBtn.classList.toggle('active', peakingOn);
+}
+applyZebraPeakingUI();
+zebraToggleBtn.onclick = () => { zebraOn = !zebraOn; localStorage.setItem('ft_zebra_on', zebraOn ? '1' : '0'); applyZebraPeakingUI(); };
+peakingToggleBtn.onclick = () => { peakingOn = !peakingOn; localStorage.setItem('ft_peaking_on', peakingOn ? '1' : '0'); applyZebraPeakingUI(); };
+
+/** Disegna il frame corrente della fotocamera dentro `canvas`, ritagliato
+ * esattamente come farebbe CSS object-fit:cover, cosicché le coordinate
+ * dell'overlay coincidano con quelle mostrate davvero a schermo. */
+function drawVideoCover(ctx, canvas) {
+  const vw = videoCameraEl.videoWidth, vh = videoCameraEl.videoHeight;
+  if (!vw || !vh) return false;
+  const cw = canvas.width, ch = canvas.height;
+  const videoRatio = vw / vh, canvasRatio = cw / ch;
+  let sx, sy, sw, sh;
+  if (videoRatio > canvasRatio) {
+    sh = vh; sw = vh * canvasRatio; sy = 0; sx = (vw - sw) / 2;
+  } else {
+    sw = vw; sh = vw / canvasRatio; sx = 0; sy = (vh - sh) / 2;
+  }
+  ctx.drawImage(videoCameraEl, sx, sy, sw, sh, 0, 0, cw, ch);
+  return true;
+}
+
+function resizeOverlayCanvas(canvas) {
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  canvas.width = OVERLAY_WORK_W;
+  canvas.height = Math.round(OVERLAY_WORK_W * (rect.height / rect.width));
+}
+
+function updateZebra() {
+  if (!drawVideoCover(zebraCtx, zebraCanvas)) return;
+  const w = zebraCanvas.width, h = zebraCanvas.height;
+  const imgData = zebraCtx.getImageData(0, 0, w, h);
+  const d = imgData.data;
+  const threshold = 235; // luminanza 0-255 oltre la quale si considera "bruciato"
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+    if (lum >= threshold) {
+      const pix = i / 4;
+      const x = pix % w, y = Math.floor(pix / w);
+      const stripe = ((x + y) % 10) < 5;
+      if (stripe) { d[i] = 20; d[i + 1] = 20; d[i + 2] = 20; d[i + 3] = 255; }
+      else { d[i] = 255; d[i + 1] = 210; d[i + 2] = 0; d[i + 3] = 255; }
+    } else {
+      d[i + 3] = 0; // trasparente: si vede il video sotto
+    }
+  }
+  zebraCtx.putImageData(imgData, 0, 0);
+}
+
+function updatePeaking() {
+  if (!drawVideoCover(peakingCtx, peakingCanvas)) return;
+  const w = peakingCanvas.width, h = peakingCanvas.height;
+  const imgData = peakingCtx.getImageData(0, 0, w, h);
+  const d = imgData.data;
+  const lumAt = (x, y) => {
+    const i = (y * w + x) * 4;
+    return 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+  };
+  const out = new Uint8ClampedArray(d.length);
+  const edgeThreshold = 60; // differenza di luminanza minima per considerarla un bordo a fuoco
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const gx = lumAt(x + 1, y) - lumAt(x - 1, y);
+      const gy = lumAt(x, y + 1) - lumAt(x, y - 1);
+      const mag = Math.sqrt(gx * gx + gy * gy);
+      const o = (y * w + x) * 4;
+      if (mag >= edgeThreshold) {
+        out[o] = 255; out[o + 1] = 45; out[o + 2] = 45; out[o + 3] = 230; // bordo a fuoco, in rosso acceso
+      } else {
+        out[o + 3] = 0;
+      }
+    }
+  }
+  peakingCtx.putImageData(new ImageData(out, w, h), 0, 0);
+}
+
+function overlayResizeAll() {
+  resizeOverlayCanvas(zebraCanvas);
+  resizeOverlayCanvas(peakingCanvas);
+}
+window.addEventListener('resize', overlayResizeAll);
+
+setInterval(() => {
+  if (!document.getElementById('screen-camera').classList.contains('active')) return;
+  if (zebraCanvas.width === 0) overlayResizeAll();
+  if (zebraOn) updateZebra();
+  if (peakingOn) updatePeaking();
+}, 150);
+
 // ---------- scatto diretto dalla schermata Fotocamera ----------
 const cameraShootBtn = document.getElementById('cameraShootBtn');
+
 cameraShootBtn.onclick = async () => {
   if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
   cameraShootBtn.disabled = true;
@@ -1725,32 +2010,217 @@ shutterBtn.onclick = () => {
 };
 
 // ---------- modalità Intervallo (loop lato client, nessun server) ----------
-intervalSecEl.oninput = () => { intervalVal.textContent = intervalSecEl.value + ' s'; };
+intervalSecEl.oninput = () => { intervalVal.textContent = intervalSecEl.value + ' s'; updateTimelapseCalc(); };
+
+// ---------- calcolatore timelapse ----------
+const timelapseFpsEl = document.getElementById('timelapseFps');
+const timelapseShotsEl = document.getElementById('timelapseShots');
+const timelapseDurationEl = document.getElementById('timelapseDuration');
+const timelapseHint = document.getElementById('timelapseHint');
+
+function formatDuration(totalSec) {
+  const m = Math.floor(totalSec / 60);
+  const s = Math.round(totalSec % 60);
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+function updateTimelapseCalc() {
+  const intervalS = parseFloat(intervalSecEl.value) || 0;
+  const count = parseInt(intervalCountEl.value, 10) || 0;
+  const durationMin = parseInt(intervalDurationEl.value, 10) || 0;
+  const fps = parseFloat(timelapseFpsEl.value);
+
+  let totalShots = null;
+  if (count > 0) totalShots = count;
+  else if (durationMin > 0 && intervalS > 0) totalShots = Math.floor((durationMin * 60) / intervalS);
+
+  if (totalShots == null) {
+    timelapseShotsEl.textContent = '—';
+    timelapseDurationEl.textContent = '—';
+    timelapseHint.textContent = 'Imposta un numero di scatti o una durata massima (non entrambi a 0) per vedere quanto durerà il video finale.';
+    return;
+  }
+
+  const videoSec = totalShots / fps;
+  timelapseShotsEl.textContent = totalShots;
+  timelapseDurationEl.textContent = formatDuration(videoSec);
+  const shootingSec = totalShots * intervalS;
+  timelapseHint.textContent = `Tempo di ripresa reale: ${formatDuration(shootingSec)} — compresso in ${formatDuration(videoSec)} di video a ${fps}fps.`;
+}
+
+timelapseFpsEl.onchange = updateTimelapseCalc;
+intervalCountEl.oninput = updateTimelapseCalc;
+intervalDurationEl.oninput = updateTimelapseCalc;
+updateTimelapseCalc();
+
+// ---------- preset scie stellari ----------
+const startrailExposureEl = document.getElementById('startrailExposure');
+const startrailExposureVal = document.getElementById('startrailExposureVal');
+const startrailHoursEl = document.getElementById('startrailHours');
+const startrailHoursVal = document.getElementById('startrailHoursVal');
+const startrailIsoEl = document.getElementById('startrailIso');
+const startrailIsoVal = document.getElementById('startrailIsoVal');
+const startrailApertureEl = document.getElementById('startrailAperture');
+const startrailShotsEl = document.getElementById('startrailShots');
+const startrailDegreesEl = document.getElementById('startrailDegrees');
+const startrailApplyBtn = document.getElementById('startrailApplyBtn');
+
+function updateStartrailCalc() {
+  const exposureS = parseFloat(startrailExposureEl.value);
+  const hours = parseFloat(startrailHoursEl.value);
+  startrailExposureVal.textContent = exposureS + ' s';
+  startrailHoursVal.textContent = hours.toFixed(1) + ' h';
+  startrailIsoVal.textContent = startrailIsoEl.value;
+  const shots = Math.round((hours * 3600) / exposureS);
+  startrailShotsEl.textContent = shots;
+  startrailDegreesEl.textContent = (hours * 15).toFixed(1) + '°'; // rotazione terrestre: 15°/ora
+}
+startrailExposureEl.oninput = updateStartrailCalc;
+startrailHoursEl.oninput = updateStartrailCalc;
+startrailIsoEl.oninput = updateStartrailCalc;
+updateStartrailCalc();
+
+startrailApplyBtn.onclick = async () => {
+  const exposureS = parseFloat(startrailExposureEl.value);
+  const hours = parseFloat(startrailHoursEl.value);
+  const iso = parseInt(startrailIsoEl.value, 10);
+  intervalSecEl.value = exposureS;
+  intervalCountEl.value = Math.round((hours * 3600) / exposureS);
+  intervalDurationEl.value = 0;
+  intervalSecEl.dispatchEvent(new Event('input'));
+  updateTimelapseCalc();
+  log('ok', `Preset scie stellari applicato: ${exposureS}s × ${startrailShotsEl.textContent} scatti`);
+
+  if (cameraConnected) {
+    try {
+      const aperture = parseFloat(startrailApertureEl.value);
+      await camera.setConfigValue('iso', String(iso));
+      await camera.setConfigValue('aperture', String(aperture));
+      await camera.setConfigValue('shutterspeed', exposureS.toFixed(1));
+      log('ok', `Applicato alla fotocamera: f/${aperture}, ISO ${iso}, ${exposureS.toFixed(1)}s`);
+    } catch (e) {
+      log('error', 'Impossibile impostare le impostazioni sulla fotocamera: ' + e.message + ' — impostale a mano da "Impostazioni manuali" in Fotocamera');
+    }
+  } else {
+    log('error', 'Fotocamera non connessa — solo i valori dell\'app sono stati impostati, ISO/apertura/tempo vanno regolati a mano sulla A6100');
+  }
+};
+
+// ---------- esposizione automatica (bulb ramping semplificato) ----------
+const rampingToggle = document.getElementById('rampingToggle');
+const rampingHint = document.getElementById('rampingHint');
+let rampingOn = localStorage.getItem('ft_ramping_on') === '1';
+
+function applyRampingUI() {
+  rampingToggle.textContent = rampingOn ? 'On' : 'Off';
+  rampingHint.style.display = rampingOn ? 'block' : 'none';
+}
+applyRampingUI();
+rampingToggle.onclick = () => {
+  rampingOn = !rampingOn;
+  localStorage.setItem('ft_ramping_on', rampingOn ? '1' : '0');
+  applyRampingUI();
+};
+
+// ---------- torcia (illumina il primo piano durante l'attesa) ----------
+const torchToggle = document.getElementById('torchToggle');
+let torchOn = false;
+
+torchToggle.onclick = async () => {
+  const stream = video.srcObject;
+  const track = stream && stream.getVideoTracks()[0];
+  if (!track) { log('error', 'Fotocamera del telefono non disponibile'); return; }
+  const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+  if (!capabilities.torch) { log('error', 'Torcia non supportata su questo telefono/browser'); return; }
+  try {
+    torchOn = !torchOn;
+    await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+    torchToggle.textContent = torchOn ? 'On' : 'Off';
+  } catch (e) {
+    torchOn = !torchOn; // annulla il toggle logico se il comando è fallito
+    log('error', 'Impossibile controllare la torcia: ' + e.message);
+  }
+};
+
+const intervalStartDelayEl = document.getElementById('intervalStartDelay');
 
 function startInterval() {
   if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
+  if (rampingOn && !meterCal) {
+    log('error', "Esposizione automatica attiva ma l'esposimetro non è calibrato — vai su Fotocamera e tocca \"Calibra qui\" prima di avviare");
+    return;
+  }
   const intervalS = parseFloat(intervalSecEl.value);
   const count = parseInt(intervalCountEl.value, 10) || 0;
-  const durationMs = (parseInt(intervalDurationEl.value, 10) || 0) * 60000;
-  const startedAt = performance.now();
-  let shots = 0;
+  const durationMin = parseInt(intervalDurationEl.value, 10) || 0;
+  const durationMs = durationMin * 60000;
+  const startDelayMin = parseInt(intervalStartDelayEl.value, 10) || 0;
 
   scheduleActive = true; scheduleMode = 'interval';
   updateShutterUI();
-  log('trigger', `Intervallo avviato: ogni ${intervalS}s`);
 
-  async function tick() {
-    if (!scheduleActive) return;
-    const result = await fireShutter(1, 0);
-    if (result.ok) { shots++; recordFlashEventSilent(); }
-    log(result.ok ? 'ok' : 'error', result.message);
-    intervalStatus.innerHTML = `Scatti effettuati: ${shots}`;
+  function beginTicking() {
+    const startedAt = performance.now();
+    const startedAtDate = new Date();
+    let shots = 0;
+    log('trigger', `Intervallo avviato: ogni ${intervalS}s${rampingOn ? ' (esposizione automatica attiva)' : ''}`);
 
-    if (count && shots >= count) { stopSchedule(); return; }
-    if (durationMs && (performance.now() - startedAt) >= durationMs) { stopSchedule(); return; }
-    if (scheduleActive) scheduleTimer = setTimeout(tick, intervalS * 1000);
+    async function tick() {
+      if (!scheduleActive) return;
+
+      if (rampingOn && meterCal) {
+        const shutterSec = computeSuggestedShutter();
+        if (shutterSec != null) {
+          const shutterLabel = shutterSec < 1 ? `1/${Math.round(1 / shutterSec)}` : shutterSec.toFixed(1);
+          try {
+            await camera.setConfigValue('iso', String(parseFloat(meterIsoEl.value)));
+            await camera.setConfigValue('aperture', String(parseFloat(meterLensEl.value)));
+            await camera.setConfigValue('shutterspeed', shutterLabel);
+          }
+          catch (e) { log('error', 'Esposizione automatica: impossibile impostare i valori — ' + e.message); }
+        }
+      }
+
+      const result = await fireShutter(1, 0);
+      if (result.ok) { shots++; recordFlashEventSilent(); }
+      log(result.ok ? 'ok' : 'error', result.message);
+
+      let statusHtml = `Scatti effettuati: ${shots}`;
+      if (count > 0) {
+        const remaining = Math.max(0, count - shots);
+        const finishAt = new Date(startedAtDate.getTime() + count * intervalS * 1000);
+        statusHtml += `<div class="big">Rimangono ${remaining} scatti — fine prevista alle ${finishAt.toLocaleTimeString('it-IT', { hour12: false })}</div>`;
+      } else if (durationMs > 0) {
+        const finishAt = new Date(startedAtDate.getTime() + durationMs);
+        const remainMs = Math.max(0, finishAt - new Date());
+        const remainMin = Math.round(remainMs / 60000);
+        statusHtml += `<div class="big">Ancora ~${remainMin} min — fine prevista alle ${finishAt.toLocaleTimeString('it-IT', { hour12: false })}</div>`;
+      }
+      intervalStatus.innerHTML = statusHtml;
+
+      if (count && shots >= count) { stopSchedule(true); return; }
+      if (durationMs && (performance.now() - startedAt) >= durationMs) { stopSchedule(true); return; }
+      if (scheduleActive) scheduleTimer = setTimeout(tick, intervalS * 1000);
+    }
+    tick();
   }
-  tick();
+
+  if (startDelayMin > 0) {
+    const startAt = new Date(Date.now() + startDelayMin * 60000);
+    log('trigger', `Partenza ritardata: inizio alle ${startAt.toLocaleTimeString('it-IT', { hour12: false })}`);
+    countdownTimer = setInterval(() => {
+      const remain = Math.max(0, Math.round((startAt - new Date()) / 1000));
+      const mm = String(Math.floor(remain / 60)).padStart(2, '0');
+      const ss = String(remain % 60).padStart(2, '0');
+      intervalStatus.innerHTML = `In attesa — inizio alle ${startAt.toLocaleTimeString('it-IT', { hour12: false })} (tra ${mm}:${ss})`;
+    }, 1000);
+    scheduleTimer = setTimeout(() => {
+      clearInterval(countdownTimer);
+      if (scheduleActive) beginTicking();
+    }, startDelayMin * 60000);
+  } else {
+    beginTicking();
+  }
 }
 
 // L'intervallometro non è un "lampo rilevato", ma va comunque contato tra
@@ -1778,16 +2248,38 @@ gpsBtn.onclick = () => {
     pos => {
       gpsCoords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       sunStatus.innerHTML = `Posizione rilevata<div class="big">${gpsCoords.lat.toFixed(4)}, ${gpsCoords.lon.toFixed(4)}</div>`;
+      renderLightWindows();
     },
     err => { sunStatus.textContent = 'Impossibile rilevare la posizione: ' + err.message; },
     { enableHighAccuracy: true, timeout: 20000 }
   );
 };
 
+function fmtTime(d) {
+  return d ? d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '—';
+}
+
+function renderLightWindows() {
+  const panel = document.getElementById('lightWindowsPanel');
+  if (!gpsCoords) { panel.innerHTML = '<p class="log-empty" style="padding:16px 0;">Rileva la posizione GPS sopra per calcolare le finestre di luce.</p>'; return; }
+  const w = computeLightWindows(gpsCoords.lat, gpsCoords.lon);
+  const rows = [
+    ['Ora blu (mattina)', w.blueMorningStart, w.blueMorningEnd],
+    ['Ora dorata (mattina)', w.goldenMorningStart, w.goldenMorningEnd],
+    ['Ora dorata (sera)', w.goldenEveningStart, w.goldenEveningEnd],
+    ['Ora blu (sera)', w.blueEveningStart, w.blueEveningEnd],
+  ];
+  panel.innerHTML = rows.map(([label, start, end]) => `
+    <div class="field-row">
+      <span class="name">${label}</span>
+      <span class="num" style="font-family:var(--font-display);font-weight:600;">${fmtTime(start)} – ${fmtTime(end)}</span>
+    </div>`).join('');
+}
+
 /** Alba/tramonto per una data e posizione — formula standard
  * "Sunrise/Sunset Algorithm" (Almanac for Computers, NOAA), di dominio
  * pubblico. Calcolo interamente offline, nessuna richiesta di rete. */
-function calcSunTime(date, lat, lon, isSunrise) {
+function calcSunTime(date, lat, lon, isSunrise, zenith = 90.833) {
   const rad = Math.PI / 180;
   const startOfYear = new Date(Date.UTC(date.getUTCFullYear(), 0, 0));
   const dayOfYear = Math.floor((date - startOfYear) / 86400000);
@@ -1806,9 +2298,8 @@ function calcSunTime(date, lat, lon, isSunrise) {
 
   const sinDec = 0.39782 * Math.sin(L * rad);
   const cosDec = Math.cos(Math.asin(sinDec));
-  const zenith = 90.833;
   const cosH = (Math.cos(zenith * rad) - (sinDec * Math.sin(lat * rad))) / (cosDec * Math.cos(lat * rad));
-  if (cosH > 1 || cosH < -1) return null; // sole sempre sotto/sopra l'orizzonte in quella data/posizione
+  if (cosH > 1 || cosH < -1) return null; // sole sempre sotto/sopra l'orizzonte in quella data/posizione/soglia
 
   let H = isSunrise ? 360 - (1 / rad) * Math.acos(cosH) : (1 / rad) * Math.acos(cosH);
   H = H / 15;
@@ -1820,6 +2311,30 @@ function calcSunTime(date, lat, lon, isSunrise) {
   result.setUTCMilliseconds(UT * 3600000);
   return result;
 }
+
+/** Alba/tramonto, ora dorata e ora blu per la posizione data, oggi
+ * (o domani se l'evento di riferimento è già passato). Zenit standard:
+ * 90.833° alba/tramonto, 84° confine ora dorata (sole a +6°), 94°/96°
+ * confini ora blu (sole tra -4° e -6°). Tutto calcolato offline. */
+function computeLightWindows(lat, lon) {
+  const now = new Date();
+  let date = now;
+  const sunset0 = calcSunTime(date, lat, lon, false, 90.833);
+  if (sunset0 && sunset0 < now) {
+    date = new Date(now); date.setUTCDate(date.getUTCDate() + 1);
+  }
+  return {
+    blueMorningStart: calcSunTime(date, lat, lon, true, 96),
+    blueMorningEnd: calcSunTime(date, lat, lon, true, 94),
+    goldenMorningStart: calcSunTime(date, lat, lon, true, 90.833),
+    goldenMorningEnd: calcSunTime(date, lat, lon, true, 84),
+    goldenEveningStart: calcSunTime(date, lat, lon, false, 84),
+    goldenEveningEnd: calcSunTime(date, lat, lon, false, 90.833),
+    blueEveningStart: calcSunTime(date, lat, lon, false, 94),
+    blueEveningEnd: calcSunTime(date, lat, lon, false, 96),
+  };
+}
+
 
 function computeSunTarget(lat, lon, event, offsetMin) {
   const now = new Date();
@@ -1855,17 +2370,35 @@ function startSun() {
     const result = await fireShutter(1, 0);
     log(result.ok ? 'ok' : 'error', result.message);
     if (result.ok) recordFlashEventSilent();
-    stopSchedule();
+    stopSchedule(true);
   }, waitMs);
 }
 
-function stopSchedule() {
+function playCompletionBeep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+    osc.start(); osc.stop(ctx.currentTime + 0.6);
+  } catch (e) { /* audio non disponibile, non critico */ }
+}
+
+function stopSchedule(finished = false) {
   scheduleActive = false; scheduleMode = null;
   clearTimeout(scheduleTimer);
   clearInterval(countdownTimer);
   intervalStatus.textContent = 'In attesa di avvio';
   sunStatus.textContent = gpsCoords ? 'Programmazione annullata' : 'Posizione non ancora rilevata';
   updateShutterUI();
+  if (finished) {
+    log('ok', 'Sessione completata');
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    playCompletionBeep();
+  }
 }
 
 startCamPreview();
