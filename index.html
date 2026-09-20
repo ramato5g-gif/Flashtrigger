@@ -687,6 +687,23 @@
     </p>
   </div>
 
+  <div class="eyebrow">Galleria scatti (questa sessione)</div>
+  <div class="panel">
+    <div class="field-row">
+      <span class="name">Salva automaticamente sul telefono</span>
+      <button class="btn-ghost" id="autoSaveToggle">Off</button>
+    </div>
+    <p class="log-empty" style="padding:8px 0 2px; text-align:left;">
+      Ogni scatto è già scaricabile singolarmente qui sotto, in più
+      qualità/formato del corpo macchina — questa opzione lo salva anche
+      da solo, senza dover toccare "Salva" ogni volta. Attenzione con
+      raffiche/timelapse lunghi: ogni scatto diventa un file scaricato.
+    </p>
+  </div>
+  <div class="panel" id="galleryPanel">
+    <p class="log-empty" style="padding:20px 0;">Nessuno scatto ancora in questa sessione.</p>
+  </div>
+
   <div class="eyebrow">Impostazioni manuali</div>
   <div class="panel">
     <div class="field-row">
@@ -1699,6 +1716,66 @@ async function bleShutterPress() {
   await bleWriteCommand([0x01, 0x08]); // rilascio pieno
 }
 
+// --------------------------------------------------------------------
+// FILE SCATTATI — captureImageAsFile() restituisce già il file vero e
+// proprio, stessa risoluzione/formato del corpo macchina: qui lo
+// teniamo in una piccola galleria (solo per questa sessione, in
+// memoria) e, se l'opzione è attiva, lo salviamo anche sul telefono.
+// --------------------------------------------------------------------
+const MAX_GALLERY_ITEMS = 30;
+let capturedGallery = []; // { url, name, time }
+let autoSaveOn = localStorage.getItem('ft_autosave_on') === '1';
+const autoSaveToggle = document.getElementById('autoSaveToggle');
+autoSaveToggle.textContent = autoSaveOn ? 'On' : 'Off';
+autoSaveToggle.onclick = () => {
+  autoSaveOn = !autoSaveOn;
+  localStorage.setItem('ft_autosave_on', autoSaveOn ? '1' : '0');
+  autoSaveToggle.textContent = autoSaveOn ? 'On' : 'Off';
+};
+
+function handleCapturedFile(file) {
+  if (!file) return;
+  const name = file.name || `scatto-${Date.now()}.jpg`;
+  const url = URL.createObjectURL(file);
+  capturedGallery.unshift({ url, name, time: new Date().toLocaleTimeString('it-IT', { hour12: false }) });
+  while (capturedGallery.length > MAX_GALLERY_ITEMS) {
+    const removed = capturedGallery.pop();
+    URL.revokeObjectURL(removed.url);
+  }
+  renderGallery();
+  if (autoSaveOn) downloadFile(url, name);
+}
+
+function downloadFile(url, name) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function renderGallery() {
+  const panel = document.getElementById('galleryPanel');
+  if (!panel) return;
+  if (!capturedGallery.length) {
+    panel.innerHTML = '<p class="log-empty" style="padding:20px 0;">Nessuno scatto ancora in questa sessione.</p>';
+    return;
+  }
+  panel.innerHTML = capturedGallery.map((item, i) => `
+    <div class="field-row">
+      <span class="name">${item.time} — ${item.name}</span>
+      <button class="btn-ghost" data-gallery-index="${i}">Salva</button>
+    </div>`).join('');
+  panel.querySelectorAll('[data-gallery-index]').forEach(btn => {
+    btn.onclick = () => {
+      const item = capturedGallery[parseInt(btn.dataset.galleryIndex, 10)];
+      if (item) downloadFile(item.url, item.name);
+    };
+  });
+}
+
+
 async function fireShutter(burstCount = 1, burstIntervalMs = 0) {
   if (bleConnected) {
     burstCount = Math.max(1, burstCount);
@@ -1724,10 +1801,11 @@ async function fireShutter(burstCount = 1, burstIntervalMs = 0) {
   try {
     for (let i = 0; i < burstCount; i++) {
       const t0 = performance.now();
-      await withCameraLock(() => camera.captureImageAsFile());
+      const file = await withCameraLock(() => camera.captureImageAsFile());
       const dt = Math.round(performance.now() - t0);
       if (burstCount > 1) log('ok', `Scatto ${i + 1}/${burstCount} in ${dt} ms`);
       else log('ok', `Scatto in ${dt} ms`);
+      handleCapturedFile(file);
       if (i < burstCount - 1 && burstIntervalMs > 0) {
         await new Promise(r => setTimeout(r, burstIntervalMs));
       }
@@ -2560,8 +2638,8 @@ const phoneCameraSelect = document.getElementById('phoneCameraSelect');
 async function startCamPreview(deviceId) {
   try {
     const videoConstraints = deviceId
-      ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-      : { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } };
+      ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+      : { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } };
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
@@ -2570,7 +2648,7 @@ async function startCamPreview(deviceId) {
       log('error', 'Sensore salvato non disponibile, torno a quello predefinito');
       localStorage.removeItem('ft_phone_camera_id');
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false
+        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false
       });
     }
 
@@ -2770,12 +2848,18 @@ function analyzeLoop() {
     const passesBasic = delta >= threshold;
     const passesScene = !sceneFilterOn || (uniformity >= (parseFloat(uniformityMinEl.value) / 100) && (!requireSudden || suddenRise));
 
-    if (passesBasic && now - lastTrigger > cooldown) {
-      flashFlag.classList.add('show');
-      setTimeout(() => flashFlag.classList.remove('show'), 260);
-      if (armed) {
-        if (passesScene) { lastTrigger = now; onFlashDetected(); }
-        else { lastTrigger = now; log('ok', `Scartato dal filtro scena (unif ${Math.round(uniformity*100)}%)`); }
+    if (passesBasic) {
+      if (now - lastTrigger > cooldown) {
+        flashFlag.classList.add('show');
+        setTimeout(() => flashFlag.classList.remove('show'), 260);
+        if (armed) {
+          if (passesScene) { lastTrigger = now; onFlashDetected(); }
+          else { lastTrigger = now; log('ok', `Scartato dal filtro scena (unif ${Math.round(uniformity*100)}%)`); }
+        } else {
+          log('ok', `DEBUG Flash: soglia superata (Δ${delta.toFixed(1)}≥${threshold}) ma non sei armato`);
+        }
+      } else {
+        log('ok', `DEBUG Flash: soglia superata (Δ${delta.toFixed(1)}≥${threshold}) ma pausa non ancora scaduta (${Math.round(now - lastTrigger)}ms < ${cooldown}ms)`);
       }
     }
     prevDelta = delta;
@@ -2815,10 +2899,15 @@ function analyzeLoop() {
 
     const beamThreshold = parseFloat(beamThresholdEl.value);
     const beamCooldown = parseFloat(beamCooldownEl.value);
-    if (beamDrop >= beamThreshold && now - lastBeamTrigger > beamCooldown) {
-      beamFlag.classList.add('show');
-      setTimeout(() => beamFlag.classList.remove('show'), 260);
-      if (beamArmed) { lastBeamTrigger = now; onBeamDetected(); }
+    if (beamDrop >= beamThreshold) {
+      if (now - lastBeamTrigger > beamCooldown) {
+        beamFlag.classList.add('show');
+        setTimeout(() => beamFlag.classList.remove('show'), 260);
+        if (beamArmed) { lastBeamTrigger = now; onBeamDetected(); }
+        else log('ok', `DEBUG Raggio: soglia superata (calo${beamDrop.toFixed(1)}≥${beamThreshold}) ma non sei armato`);
+      } else {
+        log('ok', `DEBUG Raggio: soglia superata (calo${beamDrop.toFixed(1)}≥${beamThreshold}) ma pausa non ancora scaduta (${Math.round(now - lastBeamTrigger)}ms < ${beamCooldown}ms)`);
+      }
     }
   }
   requestAnimationFrame(analyzeLoop);
