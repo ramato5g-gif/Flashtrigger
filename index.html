@@ -583,6 +583,15 @@
       <input type="text" id="voiceWordInput" value="scatta" style="width:120px;">
     </div>
     <p class="log-empty" id="voiceHint" style="padding:8px 0 2px; text-align:left; display:none;">In ascolto…</p>
+    <div class="field-row">
+      <span class="name">Telecomando esterno (tasti fisici)</span>
+      <button class="btn-ghost" id="remoteClickerToggle">Off</button>
+    </div>
+    <p class="log-empty" id="remoteClickerHint" style="padding:8px 0 2px; text-align:left; display:none;">
+      Abbina il telecomando dalle impostazioni Bluetooth del telefono
+      (non da qui), poi premi il suo tasto — l'ultimo segnale ricevuto
+      compare qui sotto e nel Registro eventi.<br><span id="remoteClickerLastEvent" style="color:var(--accent);">Ancora nessun segnale ricevuto.</span>
+    </p>
   </div>
 
   <div class="eyebrow">Esposimetro live</div>
@@ -806,6 +815,21 @@
         <div class="ctrl-head"><span class="name">Intervallo tra scatti</span><span class="num" id="intervalVal">5 s</span></div>
         <input type="range" id="intervalSec" min="1" max="300" value="5">
       </div>
+      <div class="field-row">
+        <span class="name">Intervallo progressivo</span>
+        <button class="btn-ghost" id="intervalRampToggle">Off</button>
+      </div>
+      <div id="intervalRampControls" class="hidden-panel">
+        <div class="ctrl">
+          <div class="ctrl-head"><span class="name">Intervallo iniziale</span><span class="num" id="intervalRampStartVal">5 s</span></div>
+          <input type="range" id="intervalRampStart" min="1" max="300" value="5">
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-head"><span class="name">Intervallo finale</span><span class="num" id="intervalRampEndVal">30 s</span></div>
+          <input type="range" id="intervalRampEnd" min="1" max="300" value="30">
+        </div>
+      </div>
+      <p class="log-empty" id="intervalRampHint" style="padding:8px 0 2px; text-align:left; display:none;">L'intervallo passa gradualmente da quello iniziale a quello finale nel corso della sessione (richiede "Numero scatti" o "Durata max" impostati, non entrambi a 0) — utile per tramonto→notte, scatti ravvicinati quando la luce cambia in fretta, diradati quando è stabile.</p>
       <div class="field-row">
         <span class="name">Numero scatti (0 = infinito)</span>
         <input type="text" id="intervalCount" inputmode="numeric" value="0">
@@ -2216,6 +2240,70 @@ async function triggerVoiceShot() {
   if (result.ok) recordFlashEventSilent();
 }
 
+// --------------------------------------------------------------------
+// TELECOMANDO ESTERNO — molti telecomandini Bluetooth economici (quelli
+// da action cam/selfie) funzionano in uno di due modi: emulano un tasto
+// volume del telefono, oppure mandano un comando media "play/pausa"
+// (lo stesso delle cuffie Bluetooth). Ascoltiamo entrambi, così qualunque
+// dei due sia il tuo, dovrebbe funzionare — l'abbinamento Bluetooth vero
+// e proprio si fa dalle impostazioni di sistema del telefono, non da qui.
+// --------------------------------------------------------------------
+const remoteClickerToggle = document.getElementById('remoteClickerToggle');
+const remoteClickerHint = document.getElementById('remoteClickerHint');
+const remoteClickerLastEvent = document.getElementById('remoteClickerLastEvent');
+let remoteClickerOn = false;
+let lastRemoteClickerTrigger = 0;
+
+async function triggerRemoteClickerShot(sourceLabel) {
+  const now = performance.now();
+  if (now - lastRemoteClickerTrigger < 800) return; // scarta doppi segnali dallo stesso click
+  lastRemoteClickerTrigger = now;
+  remoteClickerLastEvent.textContent = `Ultimo segnale: ${sourceLabel} alle ${new Date().toLocaleTimeString('it-IT', { hour12: false })}`;
+  if (!cameraConnected && !bleConnected) { log('error', 'Telecomando rilevato ma fotocamera non connessa'); return; }
+  const result = await fireShutter(parseInt(manualBurstCountEl.value, 10), parseInt(manualBurstIntervalEl.value, 10));
+  log(result.ok ? 'ok' : 'error', 'Telecomando esterno → ' + result.message);
+  if (result.ok) recordFlashEventSilent();
+}
+
+function onRemoteClickerKeydown(e) {
+  if (!remoteClickerOn) return;
+  // AudioVolumeUp/Down sono i codici più comuni per questo tipo di telecomando su Android/Chrome
+  if (e.key === 'AudioVolumeUp' || e.key === 'AudioVolumeDown' || e.keyCode === 24 || e.keyCode === 25) {
+    e.preventDefault();
+    triggerRemoteClickerShot(`tasto volume (${e.key || e.keyCode})`);
+  }
+}
+
+function applyRemoteClickerUI() {
+  remoteClickerToggle.textContent = remoteClickerOn ? 'On' : 'Off';
+  remoteClickerHint.style.display = remoteClickerOn ? 'block' : 'none';
+}
+applyRemoteClickerUI();
+
+remoteClickerToggle.onclick = () => {
+  remoteClickerOn = !remoteClickerOn;
+  applyRemoteClickerUI();
+  if (remoteClickerOn) {
+    log('ok', 'In ascolto del telecomando esterno — premi il suo tasto per provare');
+    // Comandi media (play/pausa) — copre i telecomandi che si comportano
+    // come cuffie Bluetooth invece che come tasti volume.
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.setActionHandler('play', () => triggerRemoteClickerShot('media play'));
+        navigator.mediaSession.setActionHandler('pause', () => triggerRemoteClickerShot('media pausa'));
+        navigator.mediaSession.setActionHandler('nexttrack', () => triggerRemoteClickerShot('media avanti'));
+      } catch (e) { /* alcuni browser non supportano tutte le azioni, non critico */ }
+    }
+  } else if ('mediaSession' in navigator) {
+    try {
+      navigator.mediaSession.setActionHandler('play', null);
+      navigator.mediaSession.setActionHandler('pause', null);
+      navigator.mediaSession.setActionHandler('nexttrack', null);
+    } catch (e) { /* non critico */ }
+  }
+};
+window.addEventListener('keydown', onRemoteClickerKeydown);
+
 // ---------- persistenza locale impostazioni ----------
 thresholdEl.value = localStorage.getItem('ft_threshold') || 35;
 delayEl.value = localStorage.getItem('ft_delay') || 0;
@@ -2837,6 +2925,51 @@ rampingToggle.onclick = () => {
   applyRampingUI();
 };
 
+// ---------- intervallo progressivo (cambia durante la sessione) ----------
+const intervalRampToggle = document.getElementById('intervalRampToggle');
+const intervalRampControls = document.getElementById('intervalRampControls');
+const intervalRampHint = document.getElementById('intervalRampHint');
+const intervalRampStartEl = document.getElementById('intervalRampStart');
+const intervalRampStartVal = document.getElementById('intervalRampStartVal');
+const intervalRampEndEl = document.getElementById('intervalRampEnd');
+const intervalRampEndVal = document.getElementById('intervalRampEndVal');
+let intervalRampOn = localStorage.getItem('ft_interval_ramp_on') === '1';
+
+intervalRampStartEl.value = localStorage.getItem('ft_interval_ramp_start') || 5;
+intervalRampEndEl.value = localStorage.getItem('ft_interval_ramp_end') || 30;
+
+function applyIntervalRampUI() {
+  intervalRampToggle.textContent = intervalRampOn ? 'On' : 'Off';
+  intervalRampControls.classList.toggle('hidden-panel', !intervalRampOn);
+  intervalRampHint.style.display = intervalRampOn ? 'block' : 'none';
+  intervalSecEl.disabled = intervalRampOn; // con la rampa attiva, l'intervallo fisso non si usa
+}
+function syncIntervalRampLabels() {
+  intervalRampStartVal.textContent = intervalRampStartEl.value + ' s';
+  intervalRampEndVal.textContent = intervalRampEndEl.value + ' s';
+}
+syncIntervalRampLabels();
+applyIntervalRampUI();
+
+intervalRampToggle.onclick = () => {
+  intervalRampOn = !intervalRampOn;
+  localStorage.setItem('ft_interval_ramp_on', intervalRampOn ? '1' : '0');
+  applyIntervalRampUI();
+};
+intervalRampStartEl.oninput = () => { syncIntervalRampLabels(); localStorage.setItem('ft_interval_ramp_start', intervalRampStartEl.value); };
+intervalRampEndEl.oninput = () => { syncIntervalRampLabels(); localStorage.setItem('ft_interval_ramp_end', intervalRampEndEl.value); };
+
+/** Intervallo corrente durante una sessione a rampa: interpolazione
+ * lineare tra iniziale e finale, in base a quanti scatti sono già stati
+ * fatti su quanti previsti in totale (0 → iniziale, 1 → finale). */
+function computeRampedInterval(shotsDone, totalShotsExpected) {
+  if (!totalShotsExpected || totalShotsExpected <= 1) return parseFloat(intervalRampStartEl.value);
+  const progress = Math.min(1, shotsDone / (totalShotsExpected - 1));
+  const start = parseFloat(intervalRampStartEl.value);
+  const end = parseFloat(intervalRampEndEl.value);
+  return start + (end - start) * progress;
+}
+
 // ---------- torcia (illumina il primo piano durante l'attesa) ----------
 const torchToggle = document.getElementById('torchToggle');
 let torchOn = false;
@@ -2871,6 +3004,17 @@ function startInterval() {
   const durationMs = durationMin * 60000;
   const startDelayMin = parseInt(intervalStartDelayEl.value, 10) || 0;
 
+  if (intervalRampOn && !count && !durationMs) {
+    log('error', 'Intervallo progressivo attivo ma servono "Numero scatti" o "Durata max" per calcolare la rampa');
+    return;
+  }
+  // se il ramp è attivo e c'è solo una durata (nessun conteggio esplicito),
+  // stima quanti scatti ci staranno usando l'intervallo medio tra inizio e fine
+  const rampAvgInterval = intervalRampOn ? (parseFloat(intervalRampStartEl.value) + parseFloat(intervalRampEndEl.value)) / 2 : intervalS;
+  const estimatedTotalShots = intervalRampOn
+    ? (count > 0 ? count : Math.max(1, Math.round(durationMs / 1000 / rampAvgInterval)))
+    : count;
+
   scheduleActive = true; scheduleMode = 'interval';
   updateShutterUI();
 
@@ -2878,7 +3022,8 @@ function startInterval() {
     const startedAt = performance.now();
     const startedAtDate = new Date();
     let shots = 0;
-    log('trigger', `Intervallo avviato: ogni ${intervalS}s${rampingOn ? ' (esposizione automatica attiva)' : ''}`);
+    const rampLabel = intervalRampOn ? `progressivo ${intervalRampStartEl.value}s→${intervalRampEndEl.value}s` : `ogni ${intervalS}s`;
+    log('trigger', `Intervallo avviato: ${rampLabel}${rampingOn ? ' (esposizione automatica attiva)' : ''}`);
 
     async function tick() {
       if (!scheduleActive) return;
@@ -2900,22 +3045,25 @@ function startInterval() {
       if (result.ok) { shots++; recordFlashEventSilent(); }
       log(result.ok ? 'ok' : 'error', result.message);
 
+      const currentInterval = intervalRampOn ? computeRampedInterval(shots, estimatedTotalShots) : intervalS;
+
       let statusHtml = `Scatti effettuati: ${shots}`;
       if (count > 0) {
         const remaining = Math.max(0, count - shots);
-        const finishAt = new Date(startedAtDate.getTime() + count * intervalS * 1000);
-        statusHtml += `<div class="big">Rimangono ${remaining} scatti — fine prevista alle ${finishAt.toLocaleTimeString('it-IT', { hour12: false })}</div>`;
+        const finishAt = new Date(startedAtDate.getTime() + count * rampAvgInterval * 1000);
+        statusHtml += `<div class="big">Rimangono ${remaining} scatti — fine prevista alle ${finishAt.toLocaleTimeString('it-IT', { hour12: false })}${intervalRampOn ? ' (stimata)' : ''}</div>`;
       } else if (durationMs > 0) {
         const finishAt = new Date(startedAtDate.getTime() + durationMs);
         const remainMs = Math.max(0, finishAt - new Date());
         const remainMin = Math.round(remainMs / 60000);
         statusHtml += `<div class="big">Ancora ~${remainMin} min — fine prevista alle ${finishAt.toLocaleTimeString('it-IT', { hour12: false })}</div>`;
       }
+      if (intervalRampOn) statusHtml += `<div style="font-size:12px;color:var(--muted);margin-top:4px;">Prossimo intervallo: ${currentInterval.toFixed(1)}s</div>`;
       intervalStatus.innerHTML = statusHtml;
 
       if (count && shots >= count) { stopSchedule(true); return; }
       if (durationMs && (performance.now() - startedAt) >= durationMs) { stopSchedule(true); return; }
-      if (scheduleActive) scheduleTimer = setTimeout(tick, intervalS * 1000);
+      if (scheduleActive) scheduleTimer = setTimeout(tick, currentInterval * 1000);
     }
     tick();
   }
