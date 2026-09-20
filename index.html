@@ -82,7 +82,7 @@
     position: fixed; top: 0; bottom: 0; left: 0; width: 78%; max-width: 300px;
     background: var(--panel); border-right: 1px solid var(--line);
     transform: translateX(-100%); transition: transform 0.22s ease; z-index: 41;
-    display: flex; flex-direction: column;
+    display: flex; flex-direction: column; overflow-y: auto;
     padding: max(20px, env(safe-area-inset-top)) 0 max(16px, env(safe-area-inset-bottom));
   }
   .drawer.open { transform: translateX(0); }
@@ -144,10 +144,13 @@
   /* ---------- strumenti mirino (griglia, livella, impostazioni) ---------- */
   .viewfinder-tools {
     position: absolute; top: max(64px, calc(env(safe-area-inset-top) + 50px)); right: 16px;
+    max-height: calc(100% - 160px);
     display: flex; flex-direction: column; gap: 10px; z-index: 3;
+    overflow-y: auto; scrollbar-width: none;
   }
+  .viewfinder-tools::-webkit-scrollbar { display: none; }
   .icon-btn-vf {
-    width: 34px; height: 34px; border-radius: 50%;
+    width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
     background: rgba(0,0,0,0.35); backdrop-filter: blur(3px); border: 1px solid rgba(255,255,255,0.12);
     color: var(--text); font-size: 14px; display: flex; align-items: center; justify-content: center;
   }
@@ -601,6 +604,10 @@
       <span class="num" id="meterBrightnessSheet" style="font-family:var(--font-display);font-weight:600;">—</span>
     </div>
     <canvas id="histogramCanvas" width="280" height="52" style="width:100%; height:52px; display:block; margin:2px 0 12px; border-radius:8px; background:var(--panel-2);"></canvas>
+    <div class="name" style="margin-bottom:6px;">Istogramma RGB</div>
+    <canvas id="histogramRGBCanvas" width="280" height="52" style="width:100%; height:52px; display:block; margin:2px 0 12px; border-radius:8px; background:var(--panel-2);"></canvas>
+    <div class="name" style="margin-bottom:6px;">Vettoroscopio</div>
+    <canvas id="vectorscopeCanvas" width="200" height="200" style="width:180px; height:180px; display:block; margin:2px auto 12px; border-radius:50%; background:#0a0a0d;"></canvas>
     <div class="ctrl">
       <div class="ctrl-head"><span class="name">Obiettivo / apertura</span></div>
       <select id="meterLens" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);width:100%;">
@@ -755,6 +762,8 @@
 
       <canvas class="overlay-canvas hidden-panel" id="zebraCanvas"></canvas>
       <canvas class="overlay-canvas hidden-panel" id="peakingCanvas"></canvas>
+      <canvas class="overlay-canvas hidden-panel" id="waveformCanvas"></canvas>
+      <canvas class="overlay-canvas hidden-panel" id="falseColorCanvas"></canvas>
 
       <div class="readout"><span class="lbl">Luce</span><span id="meterBrightness">—</span><span class="lbl" style="margin-left:8px;">posa</span><span id="meterShutterOverlay">—</span></div>
 
@@ -763,6 +772,8 @@
         <button class="icon-btn-vf" id="levelToggleBtn">◐</button>
         <button class="icon-btn-vf" id="zebraToggleBtn">▤</button>
         <button class="icon-btn-vf" id="peakingToggleBtn">◈</button>
+        <button class="icon-btn-vf" id="waveformToggleBtn">∿</button>
+        <button class="icon-btn-vf" id="falseColorToggleBtn">🎨</button>
         <button class="icon-btn-vf" id="liveViewToggleBtn">📷</button>
         <button class="icon-btn-vf" id="cameraGearBtn">⚙</button>
       </div>
@@ -1135,6 +1146,7 @@ let countdownTimer = null;
 const GRID_COLS = 4, GRID_ROWS = 3;
 const HIST_BINS = 48;
 const MOTION_COLS = 16, MOTION_ROWS = 12;
+const VECTOR_SIZE = 64;
 const MOTION_CELLS = MOTION_COLS * MOTION_ROWS;
 let motionTraceBuffer = [];
 const ZONE_COUNT = GRID_COLS * GRID_ROWS;
@@ -1441,6 +1453,67 @@ function drawHistogram(counts) {
     const barH = (counts[i] / maxCount) * (h - 2);
     histogramCtx.fillRect(i * barW, h - barH, Math.max(1, barW - 1), barH);
   }
+}
+
+const histogramRGBCanvas = document.getElementById('histogramRGBCanvas');
+const histogramRGBCtx = histogramRGBCanvas.getContext('2d');
+function drawHistogramRGB(rCounts, gCounts, bCounts) {
+  const w = histogramRGBCanvas.width, h = histogramRGBCanvas.height;
+  histogramRGBCtx.clearRect(0, 0, w, h);
+  const maxCount = Math.max(...rCounts, ...gCounts, ...bCounts, 1); // scala condivisa: i tre canali restano confrontabili tra loro
+  const barW = w / HIST_BINS;
+  histogramRGBCtx.globalCompositeOperation = 'lighten'; // dove i canali si sovrappongono, i colori si sommano invece di coprirsi
+  const channels = [[rCounts, 'rgba(255,70,70,0.75)'], [gCounts, 'rgba(70,220,90,0.75)'], [bCounts, 'rgba(70,140,255,0.75)']];
+  channels.forEach(([counts, color]) => {
+    histogramRGBCtx.fillStyle = color;
+    for (let i = 0; i < HIST_BINS; i++) {
+      const barH = (counts[i] / maxCount) * (h - 2);
+      histogramRGBCtx.fillRect(i * barW, h - barH, Math.max(1, barW - 1), barH);
+    }
+  });
+  histogramRGBCtx.globalCompositeOperation = 'source-over';
+}
+
+const vectorscopeCanvas = document.getElementById('vectorscopeCanvas');
+const vectorscopeCtx = vectorscopeCanvas.getContext('2d');
+/** I sei bersagli standard di un vettoroscopio (R,Mg,B,Cy,G,Yl), come
+ * angolo in gradi rispetto al centro — solo un riferimento visivo, la
+ * distanza dal centro indica la saturazione del colore dei pixel reali. */
+const VECTORSCOPE_TARGETS = [
+  { label: 'R', angle: 103 }, { label: 'Mg', angle: 61 }, { label: 'B', angle: 347 },
+  { label: 'Cy', angle: 283 }, { label: 'G', angle: 241 }, { label: 'Yl', angle: 167 },
+];
+function drawVectorscope(buckets) {
+  const w = vectorscopeCanvas.width, h = vectorscopeCanvas.height;
+  vectorscopeCtx.clearRect(0, 0, w, h);
+  const cx = w / 2, cy = h / 2, radius = w / 2 - 6;
+
+  // cerchi di riferimento e bersagli
+  vectorscopeCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+  vectorscopeCtx.beginPath(); vectorscopeCtx.arc(cx, cy, radius, 0, Math.PI * 2); vectorscopeCtx.stroke();
+  vectorscopeCtx.beginPath(); vectorscopeCtx.arc(cx, cy, radius * 0.5, 0, Math.PI * 2); vectorscopeCtx.stroke();
+  vectorscopeCtx.fillStyle = 'rgba(255,255,255,0.5)';
+  vectorscopeCtx.font = '9px sans-serif';
+  VECTORSCOPE_TARGETS.forEach(t => {
+    const rad = t.angle * Math.PI / 180;
+    const tx = cx + Math.cos(rad) * radius * 0.75, ty = cy - Math.sin(rad) * radius * 0.75;
+    vectorscopeCtx.fillText(t.label, tx - 6, ty + 3);
+  });
+
+  // punti reali: un pixel per bucket, luminosità proporzionale alla densità
+  const maxCount = Math.max(...buckets, 1);
+  const cellSize = (radius * 2) / VECTOR_SIZE;
+  vectorscopeCtx.fillStyle = '#57D6C4';
+  for (let vy = 0; vy < VECTOR_SIZE; vy++) {
+    for (let vx = 0; vx < VECTOR_SIZE; vx++) {
+      const v = buckets[vy * VECTOR_SIZE + vx];
+      if (!v) continue;
+      const alpha = Math.min(1, v / (maxCount * 0.3));
+      vectorscopeCtx.globalAlpha = alpha;
+      vectorscopeCtx.fillRect(cx - radius + vx * cellSize, cy - radius + vy * cellSize, cellSize, cellSize);
+    }
+  }
+  vectorscopeCtx.globalAlpha = 1;
 }
 
 // ---------- autoscatto + raffica sul pulsante di scatto manuale ----------
@@ -2044,9 +2117,17 @@ const zebraCtx = zebraCanvas.getContext('2d');
 const peakingToggleBtn = document.getElementById('peakingToggleBtn');
 const peakingCanvas = document.getElementById('peakingCanvas');
 const peakingCtx = peakingCanvas.getContext('2d');
+const waveformToggleBtn = document.getElementById('waveformToggleBtn');
+const waveformCanvas = document.getElementById('waveformCanvas');
+const waveformCtx = waveformCanvas.getContext('2d');
+const falseColorToggleBtn = document.getElementById('falseColorToggleBtn');
+const falseColorCanvas = document.getElementById('falseColorCanvas');
+const falseColorCtx = falseColorCanvas.getContext('2d');
 
 let zebraOn = localStorage.getItem('ft_zebra_on') === '1';
 let peakingOn = localStorage.getItem('ft_peaking_on') === '1';
+let waveformOn = localStorage.getItem('ft_waveform_on') === '1';
+let falseColorOn = localStorage.getItem('ft_falsecolor_on') === '1';
 const OVERLAY_WORK_W = 240; // risoluzione di lavoro: basta per un overlay leggibile, resta leggero
 
 function applyZebraPeakingUI() {
@@ -2054,10 +2135,16 @@ function applyZebraPeakingUI() {
   zebraToggleBtn.classList.toggle('active', zebraOn);
   peakingCanvas.classList.toggle('hidden-panel', !peakingOn);
   peakingToggleBtn.classList.toggle('active', peakingOn);
+  waveformCanvas.classList.toggle('hidden-panel', !waveformOn);
+  waveformToggleBtn.classList.toggle('active', waveformOn);
+  falseColorCanvas.classList.toggle('hidden-panel', !falseColorOn);
+  falseColorToggleBtn.classList.toggle('active', falseColorOn);
 }
 applyZebraPeakingUI();
 zebraToggleBtn.onclick = () => { zebraOn = !zebraOn; localStorage.setItem('ft_zebra_on', zebraOn ? '1' : '0'); applyZebraPeakingUI(); };
 peakingToggleBtn.onclick = () => { peakingOn = !peakingOn; localStorage.setItem('ft_peaking_on', peakingOn ? '1' : '0'); applyZebraPeakingUI(); };
+waveformToggleBtn.onclick = () => { waveformOn = !waveformOn; localStorage.setItem('ft_waveform_on', waveformOn ? '1' : '0'); applyZebraPeakingUI(); };
+falseColorToggleBtn.onclick = () => { falseColorOn = !falseColorOn; localStorage.setItem('ft_falsecolor_on', falseColorOn ? '1' : '0'); applyZebraPeakingUI(); };
 
 /** Disegna il frame corrente della fotocamera dentro `canvas`, ritagliato
  * esattamente come farebbe CSS object-fit:cover, cosicché le coordinate
@@ -2135,14 +2222,89 @@ function updatePeaking() {
 function overlayResizeAll() {
   resizeOverlayCanvas(zebraCanvas);
   resizeOverlayCanvas(peakingCanvas);
+  resizeOverlayCanvas(waveformCanvas);
+  resizeOverlayCanvas(falseColorCanvas);
 }
 window.addEventListener('resize', overlayResizeAll);
+
+/** Forma d'onda: per ogni colonna dell'inquadratura, mostra dove si
+ * concentrano le luminosità presenti in quella colonna — le zone dove
+ * l'onda è più densa/luminosa indicano dove si accumulano più pixel a
+ * quel livello di esposizione. Le righe orizzontali di riferimento sono
+ * a 0%, 50% e 100% di luminosità. */
+function updateWaveform() {
+  if (!drawVideoCover(waveformCtx, waveformCanvas)) return;
+  const w = waveformCanvas.width, h = waveformCanvas.height;
+  const imgData = waveformCtx.getImageData(0, 0, w, h);
+  const d = imgData.data;
+  const WF_COLS = 120;
+  const bucketCounts = new Uint16Array(WF_COLS * h);
+  const colW = w / WF_COLS;
+  for (let i = 0; i < d.length; i += 4) {
+    const pix = i / 4;
+    const x = pix % w, y = Math.floor(pix / w);
+    const lum = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+    const col = Math.min(WF_COLS - 1, Math.floor(x / colW));
+    const row = h - 1 - Math.min(h - 1, Math.round(lum / 255 * (h - 1))); // luminosità più alta = più in alto
+    bucketCounts[row * WF_COLS + col]++;
+  }
+  const out = new Uint8ClampedArray(d.length);
+  const maxCount = Math.max(...bucketCounts, 1);
+  for (let y = 0; y < h; y++) {
+    for (let col = 0; col < WF_COLS; col++) {
+      const v = bucketCounts[y * WF_COLS + col];
+      if (!v) continue;
+      const alpha = Math.min(255, Math.round((v / (maxCount * 0.4)) * 255));
+      const x0 = Math.floor(col * colW), x1 = Math.floor((col + 1) * colW);
+      for (let x = x0; x < x1; x++) {
+        const o = (y * w + x) * 4;
+        out[o] = 90; out[o + 1] = 255; out[o + 2] = 140; out[o + 3] = alpha;
+      }
+    }
+  }
+  // righe di riferimento 0/50/100%
+  [0, 0.5, 1].forEach(p => {
+    const y = Math.round((1 - p) * (h - 1));
+    for (let x = 0; x < w; x++) {
+      const o = (y * w + x) * 4;
+      out[o] = 255; out[o + 1] = 255; out[o + 2] = 255; out[o + 3] = Math.max(out[o + 3], 60);
+    }
+  });
+  waveformCtx.putImageData(new ImageData(out, w, h), 0, 0);
+}
+
+/** Falso colore: mappa le zone di esposizione su una scala di colori
+ * standard (approssimata, non calibrata come sui monitor professionali)
+ * — blu/viola per il nero, rosa per la zona tipica degli incarnati,
+ * giallo/rosso per le alte luci vicine al bruciato. Le zone "normali" di
+ * mezzo restano trasparenti (si vede il video sotto) apposta, per non
+ * coprire l'immagine dove l'esposizione è già ragionevole. */
+function updateFalseColor() {
+  if (!drawVideoCover(falseColorCtx, falseColorCanvas)) return;
+  const w = falseColorCanvas.width, h = falseColorCanvas.height;
+  const imgData = falseColorCtx.getImageData(0, 0, w, h);
+  const d = imgData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+    let r = 0, g = 0, b = 0, a = 0;
+    if (lum < 16) { r = 40; g = 0; b = 90; a = 220; }
+    else if (lum < 50) { r = 0; g = 60; b = 220; a = 200; }
+    else if (lum < 145) { a = 0; } // zona "normale": trasparente, si vede il video sotto
+    else if (lum < 180) { r = 255; g = 110; b = 180; a = 190; } // riferimento incarnati
+    else if (lum < 230) { r = 255; g = 210; b = 0; a = 200; }
+    else { r = 255; g = 20; b = 20; a = 230; }
+    d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = a;
+  }
+  falseColorCtx.putImageData(imgData, 0, 0);
+}
 
 setInterval(() => {
   if (!document.getElementById('screen-camera').classList.contains('active')) return;
   if (zebraCanvas.width === 0) overlayResizeAll();
   if (zebraOn) updateZebra();
   if (peakingOn) updatePeaking();
+  if (waveformOn) updateWaveform();
+  if (falseColorOn) updateFalseColor();
 }, 150);
 
 // ---------- scatto diretto dalla schermata Fotocamera ----------
@@ -2587,6 +2749,10 @@ function analyzeLoop(timestamp) {
     const zoneSums = new Array(ZONE_COUNT).fill(0);
     const zoneCounts = new Array(ZONE_COUNT).fill(0);
     const histCounts = new Array(HIST_BINS).fill(0);
+    const histRCounts = new Array(HIST_BINS).fill(0);
+    const histGCounts = new Array(HIST_BINS).fill(0);
+    const histBCounts = new Array(HIST_BINS).fill(0);
+    const vectorBuckets = new Uint16Array(VECTOR_SIZE * VECTOR_SIZE);
     const motionSums = new Array(MOTION_CELLS).fill(0);
     const motionCounts = new Array(MOTION_CELLS).fill(0);
     const motionCellW = w / MOTION_COLS, motionCellH = h / MOTION_ROWS;
@@ -2597,13 +2763,22 @@ function analyzeLoop(timestamp) {
       const pixelIndex = i / 4;
       const x = pixelIndex % w;
       const y = Math.floor(pixelIndex / w);
-      const lum = 0.2126 * frame[i] + 0.7152 * frame[i + 1] + 0.0722 * frame[i + 2];
+      const r = frame[i], g = frame[i + 1], b = frame[i + 2];
+      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
       sum += lum; count++;
       const zx = Math.min(GRID_COLS - 1, Math.floor(x / zoneW));
       const zy = Math.min(GRID_ROWS - 1, Math.floor(y / zoneH));
       const zi = zy * GRID_COLS + zx;
       zoneSums[zi] += lum; zoneCounts[zi]++;
       histCounts[Math.min(HIST_BINS - 1, Math.floor(lum / 256 * HIST_BINS))]++;
+      histRCounts[Math.min(HIST_BINS - 1, Math.floor(r / 256 * HIST_BINS))]++;
+      histGCounts[Math.min(HIST_BINS - 1, Math.floor(g / 256 * HIST_BINS))]++;
+      histBCounts[Math.min(HIST_BINS - 1, Math.floor(b / 256 * HIST_BINS))]++;
+      // vettoroscopio: componenti di crominanza Cb/Cr, posizionate su una griglia circolare
+      const cb = (b - lum) * 0.564, cr = (r - lum) * 0.713;
+      const vx = Math.min(VECTOR_SIZE - 1, Math.max(0, Math.round(VECTOR_SIZE / 2 + cb / 128 * (VECTOR_SIZE / 2))));
+      const vy = Math.min(VECTOR_SIZE - 1, Math.max(0, Math.round(VECTOR_SIZE / 2 - cr / 128 * (VECTOR_SIZE / 2))));
+      vectorBuckets[vy * VECTOR_SIZE + vx]++;
       const mx = Math.min(MOTION_COLS - 1, Math.floor(x / motionCellW));
       const my = Math.min(MOTION_ROWS - 1, Math.floor(y / motionCellH));
       const mi = my * MOTION_COLS + mx;
@@ -2627,7 +2802,11 @@ function analyzeLoop(timestamp) {
     const uniformity = activeZones / ZONE_COUNT;
     if (mode === 'flash') uniformityValue.textContent = delta > 1 ? Math.round(uniformity * 100) + '%' : '—';
 
-    if (document.getElementById('screen-camera').classList.contains('active')) drawHistogram(histCounts);
+    if (document.getElementById('screen-camera').classList.contains('active')) {
+      drawHistogram(histCounts);
+      drawHistogramRGB(histRCounts, histGCounts, histBCounts);
+      drawVectorscope(vectorBuckets);
+    }
 
     traceBuffer.push(delta);
     if (traceBuffer.length > TRACE_LEN) traceBuffer.shift();
