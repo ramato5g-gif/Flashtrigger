@@ -664,29 +664,6 @@
     <p class="log-empty" style="padding:10px 0 4px; text-align:left;">Stima approssimata per sensore APS-C (fattore di crop 1.5×, come la tua A6100). Oltre questo tempo le stelle iniziano a lasciare scie visibili.</p>
   </div>
 
-  <div class="eyebrow">Messa a fuoco manuale</div>
-  <div class="panel">
-    <div class="field-row">
-      <span class="name">Passo di regolazione</span>
-      <select id="focusStepSelect" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);">
-        <option value="1">Piccolo</option>
-        <option value="2" selected>Medio</option>
-        <option value="3">Grande</option>
-      </select>
-    </div>
-    <div class="field-row" style="gap:10px;">
-      <button class="btn-ghost" id="focusNearBtn" style="flex:1;">◀ Vicino</button>
-      <button class="btn-ghost" id="focusFarBtn" style="flex:1;">Lontano ▶</button>
-    </div>
-    <p class="log-empty" id="focusHint" style="padding:10px 0 4px; text-align:left;">
-      Sperimentale: il controllo del fuoco via USB è raro sui corpi Sony
-      (a differenza di Canon), a differenza di ISO/tempo/apertura. Se i
-      pulsanti non hanno effetto, probabilmente la A6100 non espone
-      questo comando su questa libreria — resta possibile solo la messa
-      a fuoco manuale sull'obiettivo o tramite autofocus della fotocamera stessa.
-    </p>
-  </div>
-
   <div class="eyebrow">Galleria scatti (questa sessione)</div>
   <div class="panel">
     <div class="field-row">
@@ -736,29 +713,6 @@
     </p>
   </div>
 
-  <div class="eyebrow">WiFi (sperimentale)</div>
-  <div class="panel">
-    <div class="field-row">
-      <span class="name">Indirizzo fotocamera</span>
-      <input type="text" id="wifiBaseUrl" value="http://192.168.122.1:8080" style="width:190px;">
-    </div>
-    <div class="field-row">
-      <span class="name">Verifica connessione</span>
-      <button class="btn-ghost" id="wifiTestBtn">Verifica</button>
-    </div>
-    <div class="field-row">
-      <span class="name">Scatta via WiFi</span>
-      <button class="btn-ghost" id="wifiShootBtn">Scatta</button>
-    </div>
-    <p class="log-empty" id="wifiHint" style="padding:10px 0 4px; text-align:left;">
-      Sperimentale — la A6100 non è nella lista ufficiale di compatibilità di
-      questa API Sony, e il browser potrebbe bloccare la lettura della
-      risposta per policy di sicurezza (CORS) anche se il comando arriva.
-      Il Bluetooth qui sopra è la via wireless più solida delle due — prova
-      prima quella.
-    </p>
-  </div>
-
   <div class="eyebrow">Come funziona</div>
   <div class="panel">
     <p style="font-size:13px; color:var(--muted); line-height:1.5; margin:10px 0;">
@@ -792,7 +746,6 @@
 
       <canvas class="overlay-canvas hidden-panel" id="zebraCanvas"></canvas>
       <canvas class="overlay-canvas hidden-panel" id="peakingCanvas"></canvas>
-      <canvas class="overlay-canvas hidden-panel" id="faceCanvas"></canvas>
 
       <div class="readout"><span class="lbl">Luce</span><span id="meterBrightness">—</span><span class="lbl" style="margin-left:8px;">posa</span><span id="meterShutterOverlay">—</span></div>
 
@@ -801,7 +754,6 @@
         <button class="icon-btn-vf" id="levelToggleBtn">◐</button>
         <button class="icon-btn-vf" id="zebraToggleBtn">▤</button>
         <button class="icon-btn-vf" id="peakingToggleBtn">◈</button>
-        <button class="icon-btn-vf" id="faceToggleBtn">👤</button>
         <button class="icon-btn-vf" id="liveViewToggleBtn">📷</button>
         <button class="icon-btn-vf" id="cameraGearBtn">⚙</button>
       </div>
@@ -1261,28 +1213,6 @@ async function tryAutoConnect() {
 const configPanel = document.getElementById('configPanel');
 const configRefreshBtn = document.getElementById('configRefreshBtn');
 
-// ---------- messa a fuoco manuale (sperimentale) ----------
-const focusStepSelect = document.getElementById('focusStepSelect');
-const focusNearBtn = document.getElementById('focusNearBtn');
-const focusFarBtn = document.getElementById('focusFarBtn');
-const focusHint = document.getElementById('focusHint');
-
-async function nudgeFocus(direction) {
-  if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
-  const step = focusStepSelect.value; // 1=piccolo 2=medio 3=grande, convenzione comune gphoto2
-  const value = direction === 'near' ? `Near ${step}` : `Far ${step}`;
-  try {
-    await withCameraLock(() => camera.setConfigValue('manualfocusdrive', value));
-    log('ok', `Fuoco spostato: ${value}`);
-    focusHint.textContent = 'Il comando è stato accettato dalla fotocamera.';
-  } catch (e) {
-    log('error', 'Comando fuoco non supportato: ' + e.message);
-    focusHint.textContent = 'La A6100 non risponde a questo comando su questa libreria — probabilmente il controllo fuoco via USB non è implementato per questo corpo.';
-  }
-}
-focusNearBtn.onclick = () => nudgeFocus('near');
-focusFarBtn.onclick = () => nudgeFocus('far');
-
 configRefreshBtn.onclick = async () => {
   if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
   configPanel.innerHTML = '<p class="log-empty" style="padding:20px 0;">Lettura in corso…</p>';
@@ -1548,69 +1478,6 @@ meterApplyBtn.onclick = async () => {
     log('ok', `Applicato alla fotocamera: f/${apertureChosen}, ISO ${isoChosen}, ${shutterLabel}s`);
   } catch (e) {
     log('error', 'Errore applicando le impostazioni: ' + e.message + ' — se i nomi campo non coincidono, imposta a mano da "Impostazioni manuali" qui sotto (l\'apertura potrebbe non essere impostabile via USB su tutti gli obiettivi — se fallisce, regolala a mano dalla fotocamera)');
-  }
-};
-
-// --------------------------------------------------------------------
-// WIFI (SPERIMENTALE) — Sony "Camera Remote API": protocollo HTTP/JSON
-// pubblicato da Sony per corpi del 2013-2015 (NEX/primi Alpha). La A6100
-// non è nella lista ufficiale di compatibilità: questo tentativo prova
-// comunque, perché a volte il firmware condiviso tra generazioni risponde
-// lo stesso. Va usato collegando il telefono al WiFi che la fotocamera
-// crea (non è lo stesso WiFi del trigger a lampo — quello resta separato).
-// --------------------------------------------------------------------
-const wifiBaseUrlEl = document.getElementById('wifiBaseUrl');
-const wifiTestBtn = document.getElementById('wifiTestBtn');
-const wifiShootBtn = document.getElementById('wifiShootBtn');
-const wifiHint = document.getElementById('wifiHint');
-
-async function sonyApiCall(method, params = []) {
-  const base = wifiBaseUrlEl.value.trim().replace(/\/$/, '');
-  const res = await fetch(`${base}/sony/camera`, {
-    method: 'POST',
-    body: JSON.stringify({ method, params, id: 1, version: '1.0' }),
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-wifiTestBtn.onclick = async () => {
-  wifiHint.textContent = 'Verifica in corso… (fino a 8s prima di arrendersi)';
-  wifiTestBtn.disabled = true;
-  log('ok', 'Verifica WiFi in corso…');
-  try {
-    const data = await sonyApiCall('getAvailableApiList');
-    const msg = 'Risponde! Il pulsante "Scatta via WiFi" dovrebbe funzionare.';
-    wifiHint.textContent = msg;
-    log('ok', 'Fotocamera raggiunta via WiFi: ' + JSON.stringify(data).slice(0, 300));
-  } catch (e) {
-    const reason = e.name === 'TimeoutError' || e.name === 'AbortError'
-      ? 'nessuna risposta entro 8s — indirizzo/porta sbagliati, o il modello non supporta questa API'
-      : e.message + ' — probabile blocco CORS del browser';
-    wifiHint.textContent = 'Verifica fallita: ' + reason;
-    log('error', 'WiFi non raggiungibile: ' + reason);
-  } finally {
-    wifiTestBtn.disabled = false;
-  }
-};
-
-wifiShootBtn.onclick = async () => {
-  wifiHint.textContent = 'Scatto in corso…';
-  wifiShootBtn.disabled = true;
-  log('trigger', 'Scatto via WiFi…');
-  try {
-    const data = await sonyApiCall('actTakePicture');
-    wifiHint.textContent = 'Scatto riuscito.';
-    log('ok', 'Scatto WiFi riuscito: ' + JSON.stringify(data).slice(0, 300));
-  } catch (e) {
-    const reason = e.name === 'TimeoutError' || e.name === 'AbortError'
-      ? 'nessuna risposta entro 8s'
-      : e.message;
-    wifiHint.textContent = 'Scatto fallito (' + reason + ') — controlla comunque se la fotocamera ha scattato lo stesso.';
-    log('error', 'Scatto WiFi fallito: ' + reason + ' — il comando può essere arrivato anche se la risposta non si legge');
-  } finally {
-    wifiShootBtn.disabled = false;
   }
 };
 
@@ -2244,7 +2111,6 @@ function updatePeaking() {
 function overlayResizeAll() {
   resizeOverlayCanvas(zebraCanvas);
   resizeOverlayCanvas(peakingCanvas);
-  resizeOverlayCanvas(faceCanvas);
 }
 window.addEventListener('resize', overlayResizeAll);
 
@@ -2254,176 +2120,6 @@ setInterval(() => {
   if (zebraOn) updateZebra();
   if (peakingOn) updatePeaking();
 }, 150);
-
-// --------------------------------------------------------------------
-// RILEVAMENTO E TRACCIAMENTO VOLTI — MediaPipe Face Landmarker (478 punti
-// per volto: occhi, labbra, contorno — non solo un riquadro), caricato
-// solo al primo utilizzo. Sopra i punti grezzi (per fotogramma)
-// aggiungiamo un tracciamento vero: ogni volto riceve un ID che resta lo
-// stesso da un fotogramma all'altro (abbinamento per sovrapposizione dei
-// riquadri — tecnica IoU), così un volto che si muove nell'inquadratura
-// mantiene la sua etichetta invece di venire ridisegnato come "nuovo"
-// ogni volta. Ciclo ogni 100ms (prima 300ms) per un aggiornamento più
-// fluido.
-// --------------------------------------------------------------------
-const faceToggleBtn = document.getElementById('faceToggleBtn');
-const faceCanvas = document.getElementById('faceCanvas');
-const faceCtx = faceCanvas.getContext('2d');
-let faceOn = false;
-let faceLandmarker = null;
-let faceDrawingConnections = null; // { lips, leftEye, rightEye, faceOval }
-let faceLoopActive = false;
-let faceWorkCanvas = null;
-let trackedFaces = []; // { id, box:{x,y,w,h}, landmarks, missedFrames }
-let nextFaceId = 1;
-
-faceToggleBtn.onclick = async () => {
-  faceOn = !faceOn;
-  faceToggleBtn.classList.toggle('active', faceOn);
-  faceCanvas.classList.toggle('hidden-panel', !faceOn);
-  if (!faceOn) { faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height); trackedFaces = []; return; }
-
-  if (!faceLandmarker) {
-    faceToggleBtn.textContent = '…';
-    log('ok', 'Carico il modello di rilevamento volti…');
-    try {
-      const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm');
-      const filesetResolver = await vision.FilesetResolver.forVisionTasks(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-      );
-      faceLandmarker = await vision.FaceLandmarker.createFromOptions(filesetResolver, {
-        baseOptions: {
-          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-        },
-        runningMode: 'VIDEO',
-        numFaces: 4,
-        outputFaceBlendshapes: false,
-        outputFacialTransformationMatrixes: false,
-      });
-      faceDrawingConnections = {
-        lips: vision.FaceLandmarker.FACE_LANDMARKS_LIPS,
-        leftEye: vision.FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,
-        rightEye: vision.FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,
-        faceOval: vision.FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,
-      };
-      log('ok', 'Modello volti pronto');
-    } catch (e) {
-      log('error', 'Impossibile caricare il rilevamento volti: ' + e.message);
-      faceOn = false;
-      faceToggleBtn.classList.remove('active');
-      faceCanvas.classList.add('hidden-panel');
-    } finally {
-      faceToggleBtn.textContent = '👤';
-    }
-  }
-  if (faceOn && faceLandmarker) startFaceLoop();
-};
-
-/** Intersection-over-Union tra due riquadri {x,y,w,h}: quanto si
- * sovrappongono, da 0 (per niente) a 1 (identici). */
-function iou(a, b) {
-  const x1 = Math.max(a.x, b.x), y1 = Math.max(a.y, b.y);
-  const x2 = Math.min(a.x + a.w, b.x + b.w), y2 = Math.min(a.y + a.h, b.y + b.h);
-  const interW = Math.max(0, x2 - x1), interH = Math.max(0, y2 - y1);
-  const interArea = interW * interH;
-  const unionArea = a.w * a.h + b.w * b.h - interArea;
-  return unionArea > 0 ? interArea / unionArea : 0;
-}
-
-/** Ricava un riquadro min/max dai 478 punti di un volto, per riusare lo
- * stesso abbinamento IoU già collaudato con il modello precedente. */
-function boxFromLandmarks(landmarks) {
-  let minX = 1, minY = 1, maxX = 0, maxY = 0;
-  landmarks.forEach(p => {
-    if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
-    if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
-  });
-  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }; // coordinate normalizzate 0-1
-}
-
-/** Abbina i nuovi volti rilevati a quelli già tracciati: se i riquadri si
- * sovrappongono abbastanza, stesso ID di prima; altrimenti nuovo ID. Un
- * volto non ritrovato per un paio di fotogrammi (es. sbattito di ciglia,
- * breve occlusione) viene tenuto un momento prima di essere tolto, per
- * non far "lampeggiare" l'etichetta. */
-function updateFaceTracking(newFaces) {
-  const updated = [];
-  const usedNew = new Set();
-  trackedFaces.forEach(t => {
-    let bestI = -1, bestScore = 0.3;
-    newFaces.forEach((nf, i) => {
-      if (usedNew.has(i)) return;
-      const score = iou(t.box, nf.box);
-      if (score > bestScore) { bestScore = score; bestI = i; }
-    });
-    if (bestI >= 0) {
-      usedNew.add(bestI);
-      updated.push({ id: t.id, box: newFaces[bestI].box, landmarks: newFaces[bestI].landmarks, missedFrames: 0 });
-    } else if (t.missedFrames < 2) {
-      updated.push({ id: t.id, box: t.box, landmarks: t.landmarks, missedFrames: t.missedFrames + 1 });
-    }
-  });
-  newFaces.forEach((nf, i) => {
-    if (!usedNew.has(i)) updated.push({ id: nextFaceId++, box: nf.box, landmarks: nf.landmarks, missedFrames: 0 });
-  });
-  trackedFaces = updated;
-}
-
-function drawFaceConnections(landmarks, connections, w, h) {
-  faceCtx.beginPath();
-  connections.forEach(c => {
-    const a = landmarks[c.start], b = landmarks[c.end];
-    if (!a || !b) return;
-    faceCtx.moveTo(a.x * w, a.y * h);
-    faceCtx.lineTo(b.x * w, b.y * h);
-  });
-  faceCtx.stroke();
-}
-
-async function startFaceLoop() {
-  if (faceLoopActive) return;
-  faceLoopActive = true;
-  if (!faceWorkCanvas) faceWorkCanvas = document.createElement('canvas');
-  while (faceOn) {
-    if (!document.getElementById('screen-camera').classList.contains('active')) {
-      await new Promise(r => setTimeout(r, 200));
-      continue;
-    }
-    try {
-      const rect = faceCanvas.getBoundingClientRect();
-      faceWorkCanvas.width = 320;
-      faceWorkCanvas.height = Math.round(320 * (rect.height / rect.width));
-      const wctx = faceWorkCanvas.getContext('2d');
-      if (liveViewOn) wctx.drawImage(liveViewImg, 0, 0, faceWorkCanvas.width, faceWorkCanvas.height);
-      else drawVideoCover(wctx, faceWorkCanvas);
-
-      const result = faceLandmarker.detectForVideo(faceWorkCanvas, performance.now());
-      const newFaces = (result.faceLandmarks || []).map(landmarks => ({
-        box: boxFromLandmarks(landmarks),
-        landmarks,
-      }));
-      updateFaceTracking(newFaces);
-
-      const w = faceCanvas.width, h = faceCanvas.height;
-      faceCtx.clearRect(0, 0, w, h);
-      faceCtx.strokeStyle = '#F0A93C';
-      faceCtx.lineWidth = 1.5;
-      faceCtx.font = '13px sans-serif';
-      faceCtx.fillStyle = '#F0A93C';
-      trackedFaces.forEach(t => {
-        if (t.landmarks && faceDrawingConnections) {
-          drawFaceConnections(t.landmarks, faceDrawingConnections.faceOval, w, h);
-          drawFaceConnections(t.landmarks, faceDrawingConnections.leftEye, w, h);
-          drawFaceConnections(t.landmarks, faceDrawingConnections.rightEye, w, h);
-          drawFaceConnections(t.landmarks, faceDrawingConnections.lips, w, h);
-        }
-        faceCtx.fillText(`Volto ${t.id}`, t.box.x * w, Math.max(14, t.box.y * h - 8));
-      });
-    } catch (e) { /* un fallimento isolato non deve fermare il ciclo */ }
-    await new Promise(r => setTimeout(r, 100));
-  }
-  faceLoopActive = false;
-}
 
 // ---------- scatto diretto dalla schermata Fotocamera ----------
 const cameraShootBtn = document.getElementById('cameraShootBtn');
@@ -2785,7 +2481,16 @@ function drawBeamTrace() {
   beamTctx.stroke();
 }
 
-function analyzeLoop() {
+let lastAnalyzeTime = 0;
+const ANALYZE_INTERVAL_MS = 66; // ~15 fotogrammi al secondo: più che sufficiente per luce/movimento, molto più leggero di 60fps
+
+function analyzeLoop(timestamp) {
+  if (timestamp - lastAnalyzeTime < ANALYZE_INTERVAL_MS) {
+    requestAnimationFrame(analyzeLoop);
+    return;
+  }
+  lastAnalyzeTime = timestamp;
+
   if (video.readyState >= 2) {
     actx.drawImage(video, 0, 0, analyzeCanvas.width, analyzeCanvas.height);
     const frame = actx.getImageData(0, 0, analyzeCanvas.width, analyzeCanvas.height).data;
