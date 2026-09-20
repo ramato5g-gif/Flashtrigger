@@ -2560,8 +2560,8 @@ const phoneCameraSelect = document.getElementById('phoneCameraSelect');
 async function startCamPreview(deviceId) {
   try {
     const videoConstraints = deviceId
-      ? { deviceId: { exact: deviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
-      : { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } };
+      ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+      : { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } };
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
@@ -2570,7 +2570,7 @@ async function startCamPreview(deviceId) {
       log('error', 'Sensore salvato non disponibile, torno a quello predefinito');
       localStorage.removeItem('ft_phone_camera_id');
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false
       });
     }
 
@@ -2720,7 +2720,7 @@ function analyzeLoop() {
     const motionCounts = new Array(MOTION_CELLS).fill(0);
     const motionCellW = w / MOTION_COLS, motionCellH = h / MOTION_ROWS;
     let sum = 0, count = 0;
-    const step = 16;
+    const step = 8; // campiona il doppio dei pixel di prima: meno rumore, più sensibilità ai cali/aumenti reali
 
     for (let i = 0; i < frame.length; i += step) {
       const pixelIndex = i / 4;
@@ -2740,7 +2740,7 @@ function analyzeLoop() {
     }
 
     const avg = sum / count / 255 * 100;
-    if (baseline === null) baseline = avg; else baseline = baseline * 0.92 + avg * 0.08;
+    if (baseline === null) baseline = avg; else baseline = baseline * 0.95 + avg * 0.05;
     currentBrightness = avg;
     const delta = Math.max(0, avg - baseline);
     luxValue.textContent = delta.toFixed(1);
