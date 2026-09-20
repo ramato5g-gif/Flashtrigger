@@ -1644,7 +1644,7 @@ bleConnectBtn.onclick = async () => {
       log('error', 'Bluetooth disconnesso');
     });
 
-    const server = await bleDevice.gatt.connect();
+    const server = await withTimeout(bleDevice.gatt.connect(), 15000, 'Connessione GATT Bluetooth');
     log('ok', 'Bluetooth: GATT collegato, cerco il servizio della fotocamera…');
 
     const service = await server.getPrimaryService(BLE_SERVICE_UUID);
