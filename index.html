@@ -29,6 +29,7 @@
     --live-dim: #4A241D;
     --trace: #57D6C4;
     --wild: #8BC34A;
+    --beam: #FF3D8F;
     --font-display: 'Space Grotesk', -apple-system, sans-serif;
     --font-body: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
@@ -96,6 +97,7 @@
   .drawer-item.active .tab-dot.interval { background: var(--trace); }
   .drawer-item.active .tab-dot.sun { background: var(--accent); }
   .drawer-item.active .tab-dot.motion { background: var(--wild); }
+  .drawer-item.active .tab-dot.beam { background: var(--beam); }
   .drawer-item .badge {
     margin-left: auto; font-family: var(--font-display); font-size: 10.5px; font-weight: 600; color: var(--muted);
     font-variant-numeric: tabular-nums; padding: 2px 7px; border-radius: 10px; background: var(--panel-2); letter-spacing: 0.03em;
@@ -104,6 +106,7 @@
   .drawer-item .badge.on-interval { color: var(--trace); background: rgba(87,214,196,0.14); }
   .drawer-item .badge.on-sun { color: var(--accent); background: rgba(240,169,60,0.14); }
   .drawer-item .badge.on-motion { color: var(--wild); background: rgba(139,195,74,0.14); }
+  .drawer-item .badge.on-beam { color: var(--beam); background: rgba(255,61,143,0.14); }
   .drawer-spacer { flex: 1; }
 
   /* ---------- screens ---------- */
@@ -114,7 +117,7 @@
   @keyframes screenIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
   /* ---------- viewfinder (schermata Flash, stile fotocamera) ---------- */
-  #screen-flash, #screen-camera, #screen-motion { overflow: hidden; }
+  #screen-flash, #screen-camera, #screen-motion, #screen-beam { overflow: hidden; }
   .viewfinder { position: relative; flex: 1; background: #000; overflow: hidden; }
   video { width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0.85; }
   canvas.hidden { display: none; }
@@ -250,17 +253,20 @@
   }
   .control-bar.docked { border-top: 1px solid var(--line); background: var(--bg); }
 
-  .mode-pills { display: flex; gap: 8px; margin-bottom: 14px; }
+  .mode-pills { display: flex; gap: 8px; margin-bottom: 14px; overflow-x: auto; scrollbar-width: none; }
+  .mode-pills::-webkit-scrollbar { display: none; }
   .mode-pill {
-    flex: 1; text-align: center; padding: 8px 4px; border-radius: 20px;
+    flex: 0 0 auto; min-width: 84px; text-align: center; padding: 8px 10px; border-radius: 20px;
     border: 1px solid var(--line); background: rgba(23,24,29,0.55); backdrop-filter: blur(3px);
     color: var(--muted); font-family: var(--font-display); font-weight: 600; font-size: 11px; letter-spacing: 0.02em;
+    white-space: nowrap;
   }
   .mode-pill.active { color: var(--text); border-color: rgba(255,255,255,0.18); background: rgba(46,48,58,0.75); }
   .mode-pill.active[data-screen="flash"] { color: var(--live); }
   .mode-pill.active[data-screen="interval"] { color: var(--trace); }
   .mode-pill.active[data-screen="sun"] { color: var(--accent); }
   .mode-pill.active[data-screen="motion"] { color: var(--wild); }
+  .mode-pill.active[data-screen="beam"] { color: var(--beam); }
 
   .shutter-row { display: flex; align-items: center; justify-content: center; position: relative; height: 76px; }
   .shutter-btn {
@@ -373,6 +379,7 @@
   <button class="drawer-item" data-screen="interval"><span class="tab-dot interval"></span>Intervallo<span class="badge" id="badgeInterval"></span></button>
   <button class="drawer-item" data-screen="sun"><span class="tab-dot sun"></span>Alba/Tramonto<span class="badge" id="badgeSun"></span></button>
   <button class="drawer-item" data-screen="motion"><span class="tab-dot motion"></span>Animali<span class="badge" id="badgeMotion"></span></button>
+  <button class="drawer-item" data-screen="beam"><span class="tab-dot beam"></span>Raggio<span class="badge" id="badgeBeam"></span></button>
 
   <div class="drawer-section">Info</div>
   <button class="drawer-item" data-screen="stats">Statistiche</button>
@@ -461,6 +468,45 @@
       — punta il telefono e la fotocamera verso lo stesso punto e lascia
       "Pausa tra scatti" abbastanza alta da non sprecare scatti sullo
       stesso passaggio di un animale.
+    </p>
+  </div>
+</div>
+
+<div class="sheet-overlay" id="beamSheetOverlay"></div>
+<div class="sheet" id="beamSheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">Impostazioni Raggio</div>
+  <div class="panel">
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Sensibilità calo di luce</span><span class="num" id="beamThresholdVal">25</span></div>
+      <input type="range" id="beamThreshold" min="5" max="90" value="25">
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Ritardo scatto</span><span class="num" id="beamDelayVal">0 ms</span></div>
+      <input type="range" id="beamDelay" min="0" max="1000" value="0" step="50">
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Pausa tra scatti</span><span class="num" id="beamCooldownVal">1.5 s</span></div>
+      <input type="range" id="beamCooldown" min="200" max="10000" value="1500" step="100">
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Scatti in raffica</span><span class="num" id="beamBurstCountVal">1</span></div>
+      <input type="range" id="beamBurstCount" min="1" max="10" value="1">
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Intervallo raffica</span><span class="num" id="beamBurstIntervalVal">0 ms</span></div>
+      <input type="range" id="beamBurstInterval" min="0" max="1000" value="0" step="10">
+    </div>
+  </div>
+  <div class="panel">
+    <p style="font-size:13px; color:var(--muted); line-height:1.5; margin:10px 0;">
+      L'opposto di Flash: invece di scattare quando la luce aumenta di
+      colpo, scatta quando <strong>cala</strong> di colpo — utile per
+      emulare un trigger a raggio interrotto. Punta il telefono verso una
+      sorgente di luce fissa e costante (una torcia, una lampada, un
+      puntatore laser su un bersaglio) posta dall'altra parte del punto
+      da sorvegliare: quando qualcosa passa in mezzo e blocca la luce, il
+      telefono lo rileva e scatta.
     </p>
   </div>
 </div>
@@ -774,6 +820,17 @@
     </div>
   </div>
 
+  <div class="screen" data-screen="beam" id="screen-beam">
+    <div class="viewfinder">
+      <video id="videoBeam" autoplay muted playsinline></video>
+      <div class="readout"><span class="lbl">calo</span><span id="beamValue">0.0</span></div>
+      <button class="gear-fab" id="beamGearBtn">⚙</button>
+      <div class="flash-flag" id="beamFlag" style="background:rgba(255,61,143,0.2); color:var(--beam); border-color:rgba(255,61,143,0.4);">INTERROTTO</div>
+      <div class="trace-shade"></div>
+      <canvas id="beamTraceCanvas" class="trace-canvas"></canvas>
+    </div>
+  </div>
+
   <div class="screen scroll-pad" data-screen="interval">
     <div class="panel" style="margin-top:64px;">
       <div class="ctrl">
@@ -970,6 +1027,7 @@
     <button class="mode-pill" data-screen="interval">INTERVALLO</button>
     <button class="mode-pill" data-screen="sun">ALBA/TRAMONTO</button>
     <button class="mode-pill" data-screen="motion">ANIMALI</button>
+    <button class="mode-pill" data-screen="beam">RAGGIO</button>
   </div>
   <div class="shutter-row">
     <button class="shutter-btn" id="shutterBtn">ARMA</button>
@@ -1019,6 +1077,20 @@ const motionBurstIntervalEl = document.getElementById('motionBurstInterval');
 const motionBurstIntervalVal = document.getElementById('motionBurstIntervalVal');
 const motionTraceCanvas = document.getElementById('motionTraceCanvas');
 const motionTctx = motionTraceCanvas.getContext('2d');
+const beamValue = document.getElementById('beamValue');
+const beamFlag = document.getElementById('beamFlag');
+const beamThresholdEl = document.getElementById('beamThreshold');
+const beamThresholdVal = document.getElementById('beamThresholdVal');
+const beamDelayEl = document.getElementById('beamDelay');
+const beamDelayVal = document.getElementById('beamDelayVal');
+const beamCooldownEl = document.getElementById('beamCooldown');
+const beamCooldownVal = document.getElementById('beamCooldownVal');
+const beamBurstCountEl = document.getElementById('beamBurstCount');
+const beamBurstCountVal = document.getElementById('beamBurstCountVal');
+const beamBurstIntervalEl = document.getElementById('beamBurstInterval');
+const beamBurstIntervalVal = document.getElementById('beamBurstIntervalVal');
+const beamTraceCanvas = document.getElementById('beamTraceCanvas');
+const beamTctx = beamTraceCanvas.getContext('2d');
 const logEl = document.getElementById('log');
 
 const statsToday = document.getElementById('statsToday');
@@ -1051,6 +1123,9 @@ let mode = 'flash';
 let armed = false;
 let motionArmed = false;
 let lastMotionTrigger = 0;
+let beamArmed = false;
+let lastBeamTrigger = 0;
+let beamTraceBuffer = [];
 let prevFrameLum = null; // griglia campionata del frame precedente, per il confronto
 let baseline = null;
 let lastTrigger = 0;
@@ -1558,23 +1633,49 @@ bleConnectBtn.onclick = async () => {
   if (!('bluetooth' in navigator)) { log('error', 'Web Bluetooth non disponibile su questo browser'); return; }
   bleConnectBtn.disabled = true;
   try {
+    log('ok', 'Bluetooth: apro il selettore dispositivi…');
     bleDevice = await navigator.bluetooth.requestDevice({
       filters: [{ manufacturerData: [{ companyIdentifier: 0x012D }] }], // identificativo Bluetooth di Sony
       optionalServices: [BLE_SERVICE_UUID],
     });
+    log('ok', `Bluetooth: dispositivo scelto (${bleDevice.name || 'senza nome'}), mi collego al GATT…`);
     bleDevice.addEventListener('gattserverdisconnected', () => {
       setBleStatus(false);
       log('error', 'Bluetooth disconnesso');
     });
+
     const server = await bleDevice.gatt.connect();
+    log('ok', 'Bluetooth: GATT collegato, cerco il servizio della fotocamera…');
+
     const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+    log('ok', 'Bluetooth: servizio trovato, cerco i canali di comando…');
+
     bleCommandChar = await service.getCharacteristic(BLE_COMMAND_CHAR_UUID);
+    log('ok', 'Bluetooth: canale di scatto trovato, mi metto in ascolto delle risposte…');
+
+    // Molte fotocamere/periferiche BLE considerano la connessione "attiva"
+    // solo dopo che il telefono si è iscritto alle notifiche di stato —
+    // senza questo passaggio i comandi di scatto potrebbero non avere
+    // effetto anche a connessione apparentemente riuscita.
+    try {
+      const statusChar = await service.getCharacteristic(BLE_STATUS_CHAR_UUID);
+      await statusChar.startNotifications();
+      statusChar.addEventListener('characteristicvaluechanged', (event) => {
+        const bytes = Array.from(new Uint8Array(event.target.value.buffer))
+          .map(b => b.toString(16).padStart(2, '0')).join(' ');
+        log('ok', 'Bluetooth: risposta fotocamera → ' + bytes);
+      });
+      log('ok', 'Bluetooth: iscritto alle notifiche di stato');
+    } catch (e) {
+      log('error', 'Bluetooth: notifiche di stato non disponibili (' + e.message + ') — proseguo comunque');
+    }
+
     setBleStatus(true);
     log('ok', 'Fotocamera connessa via Bluetooth');
     bleHint.textContent = 'Connesso — i trigger ora scattano via Bluetooth.';
   } catch (e) {
     setBleStatus(false);
-    log('error', 'Connessione Bluetooth fallita: ' + e.message);
+    log('error', 'Connessione Bluetooth fallita: ' + e.name + ' — ' + e.message);
   } finally {
     bleConnectBtn.disabled = false;
   }
@@ -1752,8 +1853,8 @@ const screens = document.querySelectorAll('.screen');
 const headerTitle = document.getElementById('headerTitle');
 const headerDot = document.getElementById('headerDot');
 
-const SCREEN_LABELS = { flash: 'Flash', interval: 'Intervallo', sun: 'Alba/Tramonto', motion: 'Animali', stats: 'Statistiche', log: 'Registro eventi', camera: 'Fotocamera', scenepresets: 'Preset scena' };
-const SCREEN_DOT_COLOR = { flash: 'var(--live)', interval: 'var(--trace)', sun: 'var(--accent)', motion: 'var(--wild)', stats: 'var(--muted-2)', log: 'var(--muted-2)', camera: 'var(--accent)', scenepresets: 'var(--muted-2)' };
+const SCREEN_LABELS = { flash: 'Flash', interval: 'Intervallo', sun: 'Alba/Tramonto', motion: 'Animali', beam: 'Raggio', stats: 'Statistiche', log: 'Registro eventi', camera: 'Fotocamera', scenepresets: 'Preset scena' };
+const SCREEN_DOT_COLOR = { flash: 'var(--live)', interval: 'var(--trace)', sun: 'var(--accent)', motion: 'var(--wild)', beam: 'var(--beam)', stats: 'var(--muted-2)', log: 'var(--muted-2)', camera: 'var(--accent)', scenepresets: 'var(--muted-2)' };
 
 function openMenu() { overlay.classList.add('open'); drawer.classList.add('open'); }
 function closeMenu() { overlay.classList.remove('open'); drawer.classList.remove('open'); }
@@ -1767,9 +1868,9 @@ function goToScreen(name) {
   modePills.forEach(p => p.classList.toggle('active', p.dataset.screen === name));
   headerTitle.textContent = SCREEN_LABELS[name];
   headerDot.style.background = SCREEN_DOT_COLOR[name];
-  if (['flash', 'interval', 'sun', 'motion'].includes(name)) mode = name;
+  if (['flash', 'interval', 'sun', 'motion', 'beam'].includes(name)) mode = name;
 
-  const isShootingMode = ['flash', 'interval', 'sun', 'motion'].includes(name);
+  const isShootingMode = ['flash', 'interval', 'sun', 'motion', 'beam'].includes(name);
   controlBar.style.display = isShootingMode ? 'block' : 'none';
   controlBar.classList.toggle('on-viewfinder', name === 'flash' || name === 'motion');
   controlBar.classList.toggle('docked', isShootingMode && name !== 'flash' && name !== 'motion');
@@ -1807,6 +1908,14 @@ function openMotionSheet() { motionSheet.classList.add('open'); motionSheetOverl
 function closeMotionSheet() { motionSheet.classList.remove('open'); motionSheetOverlay.classList.remove('open'); }
 motionGearBtn.onclick = openMotionSheet;
 motionSheetOverlay.onclick = closeMotionSheet;
+
+const beamSheet = document.getElementById('beamSheet');
+const beamSheetOverlay = document.getElementById('beamSheetOverlay');
+const beamGearBtn = document.getElementById('beamGearBtn');
+function openBeamSheet() { beamSheet.classList.add('open'); beamSheetOverlay.classList.add('open'); }
+function closeBeamSheet() { beamSheet.classList.remove('open'); beamSheetOverlay.classList.remove('open'); }
+beamGearBtn.onclick = openBeamSheet;
+beamSheetOverlay.onclick = closeBeamSheet;
 
 // ---------- preset scena (paesaggio/ritratto/sport/notte) ----------
 const sceneLensEl = document.getElementById('sceneLens');
@@ -2392,6 +2501,28 @@ motionCooldownEl.oninput = () => { syncMotionLabels(); localStorage.setItem('ft_
 motionBurstCountEl.oninput = () => { syncMotionLabels(); localStorage.setItem('ft_motion_burst_count', motionBurstCountEl.value); };
 motionBurstIntervalEl.oninput = () => { syncMotionLabels(); localStorage.setItem('ft_motion_burst_interval', motionBurstIntervalEl.value); };
 
+// ---------- persistenza controlli Raggio ----------
+beamThresholdEl.value = localStorage.getItem('ft_beam_threshold') || 25;
+beamDelayEl.value = localStorage.getItem('ft_beam_delay') || 0;
+beamCooldownEl.value = localStorage.getItem('ft_beam_cooldown') || 1500;
+beamBurstCountEl.value = localStorage.getItem('ft_beam_burst_count') || 1;
+beamBurstIntervalEl.value = localStorage.getItem('ft_beam_burst_interval') || 0;
+
+function syncBeamLabels() {
+  beamThresholdVal.textContent = beamThresholdEl.value;
+  beamDelayVal.textContent = beamDelayEl.value + ' ms';
+  beamCooldownVal.textContent = (beamCooldownEl.value / 1000).toFixed(1) + ' s';
+  beamBurstCountVal.textContent = beamBurstCountEl.value;
+  beamBurstIntervalVal.textContent = beamBurstIntervalEl.value + ' ms';
+}
+syncBeamLabels();
+
+beamThresholdEl.oninput = () => { syncBeamLabels(); localStorage.setItem('ft_beam_threshold', beamThresholdEl.value); };
+beamDelayEl.oninput = () => { syncBeamLabels(); localStorage.setItem('ft_beam_delay', beamDelayEl.value); };
+beamCooldownEl.oninput = () => { syncBeamLabels(); localStorage.setItem('ft_beam_cooldown', beamCooldownEl.value); };
+beamBurstCountEl.oninput = () => { syncBeamLabels(); localStorage.setItem('ft_beam_burst_count', beamBurstCountEl.value); };
+beamBurstIntervalEl.oninput = () => { syncBeamLabels(); localStorage.setItem('ft_beam_burst_interval', beamBurstIntervalEl.value); };
+
 function log(kind, text) {
   const time = new Date().toLocaleTimeString('it-IT', { hour12: false }) + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
   const row = document.createElement('div');
@@ -2414,6 +2545,13 @@ function resizeMotionTrace() {
   if (rect.width === 0) return;
   motionTraceCanvas.width = rect.width * devicePixelRatio;
   motionTraceCanvas.height = rect.height * devicePixelRatio;
+}
+
+function resizeBeamTrace() {
+  const rect = beamTraceCanvas.getBoundingClientRect();
+  if (rect.width === 0) return;
+  beamTraceCanvas.width = rect.width * devicePixelRatio;
+  beamTraceCanvas.height = rect.height * devicePixelRatio;
 }
 
 let currentPhoneStream = null;
@@ -2451,9 +2589,15 @@ async function startCamPreview(deviceId) {
       videoMotionEl.srcObject = stream; // stesso stream, terza anteprima nella schermata Animali
       videoMotionEl.play().catch(() => {});
     }
+    const videoBeamEl = document.getElementById('videoBeam');
+    if (videoBeamEl) {
+      videoBeamEl.srcObject = stream; // stesso stream, quarta anteprima nella schermata Raggio
+      videoBeamEl.play().catch(() => {});
+    }
     analyzeCanvas.width = 160; analyzeCanvas.height = 120;
     resizeTrace();
     resizeMotionTrace();
+    resizeBeamTrace();
     requestAnimationFrame(analyzeLoop);
     await populatePhoneCameraList();
   } catch (e) {
@@ -2462,6 +2606,7 @@ async function startCamPreview(deviceId) {
 }
 window.addEventListener('resize', resizeTrace);
 window.addEventListener('resize', resizeMotionTrace);
+window.addEventListener('resize', resizeBeamTrace);
 
 /** Elenca le fotocamere posteriori disponibili. Le etichette (nomi reali,
  * es. "Ultra-wide") sono visibili solo dopo che il permesso è stato
@@ -2534,6 +2679,32 @@ function drawMotionTrace() {
     i === 0 ? motionTctx.moveTo(x, y) : motionTctx.lineTo(x, y);
   });
   motionTctx.stroke();
+}
+
+function drawBeamTrace() {
+  const w = beamTraceCanvas.width, h = beamTraceCanvas.height;
+  if (!w || !h) return;
+  beamTctx.clearRect(0, 0, w, h);
+  const threshold = parseFloat(beamThresholdEl.value);
+  const scaleMax = 60;
+  const thY = h - (threshold / scaleMax) * h;
+  beamTctx.strokeStyle = 'rgba(255,61,143,0.45)';
+  beamTctx.setLineDash([4 * devicePixelRatio, 4 * devicePixelRatio]);
+  beamTctx.lineWidth = 1 * devicePixelRatio;
+  beamTctx.beginPath(); beamTctx.moveTo(0, thY); beamTctx.lineTo(w, thY); beamTctx.stroke();
+  beamTctx.setLineDash([]);
+
+  if (beamTraceBuffer.length < 2) return;
+  const stepX = w / (TRACE_LEN - 1);
+  beamTctx.strokeStyle = '#FF3D8F';
+  beamTctx.lineWidth = 1.6 * devicePixelRatio;
+  beamTctx.beginPath();
+  beamTraceBuffer.forEach((v, i) => {
+    const x = i * stepX;
+    const y = h - Math.min(1, v / scaleMax) * h;
+    i === 0 ? beamTctx.moveTo(x, y) : beamTctx.lineTo(x, y);
+  });
+  beamTctx.stroke();
 }
 
 function analyzeLoop() {
@@ -2632,12 +2803,29 @@ function analyzeLoop() {
       setTimeout(() => motionFlag.classList.remove('show'), 260);
       if (motionArmed) { lastMotionTrigger = now; onMotionDetected(); }
     }
+
+    // --- rilevamento calo di luce (modalità Raggio) — usa la stessa
+    // coppia avg/baseline già calcolata sopra per Flash, letta al
+    // contrario: un calo invece di un aumento. ---
+    const beamDrop = Math.max(0, baseline - avg);
+    beamValue.textContent = beamDrop.toFixed(1);
+    beamTraceBuffer.push(beamDrop);
+    if (beamTraceBuffer.length > TRACE_LEN) beamTraceBuffer.shift();
+    if (document.getElementById('screen-beam').classList.contains('active')) drawBeamTrace();
+
+    const beamThreshold = parseFloat(beamThresholdEl.value);
+    const beamCooldown = parseFloat(beamCooldownEl.value);
+    if (beamDrop >= beamThreshold && now - lastBeamTrigger > beamCooldown) {
+      beamFlag.classList.add('show');
+      setTimeout(() => beamFlag.classList.remove('show'), 260);
+      if (beamArmed) { lastBeamTrigger = now; onBeamDetected(); }
+    }
   }
   requestAnimationFrame(analyzeLoop);
 }
 
 async function onFlashDetected() {
-  if (!cameraConnected) { log('error', 'Fotocamera non connessa'); return; }
+  if (!cameraConnected && !bleConnected) { log('error', 'Fotocamera non connessa'); return; }
   log('trigger', 'Lampo rilevato → scatto');
   const delayMs = parseInt(delayEl.value, 10);
   if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
@@ -2647,11 +2835,21 @@ async function onFlashDetected() {
 }
 
 async function onMotionDetected() {
-  if (!cameraConnected) { log('error', 'Fotocamera non connessa'); return; }
+  if (!cameraConnected && !bleConnected) { log('error', 'Fotocamera non connessa'); return; }
   log('trigger', 'Movimento rilevato → scatto');
   const delayMs = parseInt(motionDelayEl.value, 10);
   if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
   const result = await fireShutter(parseInt(motionBurstCountEl.value, 10), parseInt(motionBurstIntervalEl.value, 10));
+  log(result.ok ? 'ok' : 'error', result.message);
+  if (result.ok) recordFlashEventSilent();
+}
+
+async function onBeamDetected() {
+  if (!cameraConnected && !bleConnected) { log('error', 'Fotocamera non connessa'); return; }
+  log('trigger', 'Raggio interrotto → scatto');
+  const delayMs = parseInt(beamDelayEl.value, 10);
+  if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
+  const result = await fireShutter(parseInt(beamBurstCountEl.value, 10), parseInt(beamBurstIntervalEl.value, 10));
   log(result.ok ? 'ok' : 'error', result.message);
   if (result.ok) recordFlashEventSilent();
 }
@@ -2675,6 +2873,10 @@ function updateBadges() {
   const bM = document.getElementById('badgeMotion');
   bM.textContent = motionArmed ? 'ARMATO' : '';
   bM.className = 'badge' + (motionArmed ? ' on-motion' : '');
+
+  const bB = document.getElementById('badgeBeam');
+  bB.textContent = beamArmed ? 'ARMATO' : '';
+  bB.className = 'badge' + (beamArmed ? ' on-beam' : '');
 }
 
 // ---------- pulsante di scatto unico ----------
@@ -2697,13 +2899,17 @@ function updateShutterUI() {
     shutterBtn.textContent = motionArmed ? 'STOP' : 'ARMA';
     shutterBtn.classList.toggle('armed', motionArmed);
     hintEl.textContent = motionArmed ? 'Armato — scatta al prossimo movimento rilevato' : 'Punta il telefono verso la zona da sorvegliare, poi attiva';
+  } else if (mode === 'beam') {
+    shutterBtn.textContent = beamArmed ? 'STOP' : 'ARMA';
+    shutterBtn.classList.toggle('armed', beamArmed);
+    hintEl.textContent = beamArmed ? 'Armato — scatta quando la luce cala di colpo' : 'Punta verso una luce fissa, poi attiva';
   }
   updateBadges();
 }
 
 shutterBtn.onclick = () => {
   if (mode === 'flash') {
-    if (!cameraConnected) { log('error', 'Connetti prima la fotocamera (menu → Fotocamera)'); return; }
+    if (!cameraConnected && !bleConnected) { log('error', 'Connetti prima la fotocamera (menu → Fotocamera)'); return; }
     armed = !armed;
     log(armed ? 'trigger' : 'ok', armed ? 'Sistema armato' : 'Sistema disattivato');
     updateShutterUI();
@@ -2712,9 +2918,14 @@ shutterBtn.onclick = () => {
   } else if (mode === 'sun') {
     if (scheduleActive && scheduleMode === 'sun') stopSchedule(); else startSun();
   } else if (mode === 'motion') {
-    if (!cameraConnected) { log('error', 'Connetti prima la fotocamera (menu → Fotocamera)'); return; }
+    if (!cameraConnected && !bleConnected) { log('error', 'Connetti prima la fotocamera (menu → Fotocamera)'); return; }
     motionArmed = !motionArmed;
     log(motionArmed ? 'trigger' : 'ok', motionArmed ? 'Sistema armato (movimento)' : 'Sistema disattivato');
+    updateShutterUI();
+  } else if (mode === 'beam') {
+    if (!cameraConnected && !bleConnected) { log('error', 'Connetti prima la fotocamera (menu → Fotocamera)'); return; }
+    beamArmed = !beamArmed;
+    log(beamArmed ? 'trigger' : 'ok', beamArmed ? 'Sistema armato (raggio)' : 'Sistema disattivato');
     updateShutterUI();
   }
 };
