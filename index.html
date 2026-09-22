@@ -234,14 +234,16 @@
   .ctrl-head .name { font-size: 13px; color: var(--muted); font-weight: 500; }
   .ctrl-head .num { font-family: var(--font-display); font-weight: 600; font-size: 15px; color: var(--text); font-variant-numeric: tabular-nums; }
 
-  input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 3px; border-radius: 2px; background: var(--line); outline: none; margin: 4px 0; }
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 2px; background: var(--panel-3); outline: none; margin: 6px 0; }
   input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
-    background: var(--accent); border: 3px solid var(--bg); box-shadow: 0 0 0 1px var(--accent); margin-top: -1px;
+    background: var(--accent); border: 3px solid var(--bg); box-shadow: 0 1px 4px rgba(0,0,0,0.4), 0 0 0 1px rgba(232,162,61,0.5); margin-top: -1px;
+    transition: transform 0.1s var(--ease);
   }
+  input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.15); }
   input[type="range"]#delay::-webkit-slider-thumb,
   input[type="range"]#cooldown::-webkit-slider-thumb,
-  input[type="range"]#burstInterval::-webkit-slider-thumb { background: var(--trace); box-shadow: 0 0 0 1px var(--trace); }
+  input[type="range"]#burstInterval::-webkit-slider-thumb { background: var(--trace); box-shadow: 0 1px 4px rgba(0,0,0,0.4), 0 0 0 1px rgba(79,191,172,0.5); }
 
   .field-row { display: flex; align-items: center; justify-content: space-between; padding: 13px 0; gap: 12px; }
   .field-row + .field-row { border-top: 1px solid var(--line); }
@@ -255,6 +257,20 @@
   input[type="text"]:focus { outline: none; border-color: var(--accent); }
 
   .btn-ghost { background: linear-gradient(180deg, var(--panel-3), var(--panel-2)); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 500; font-family: var(--font-body); box-shadow: var(--shadow-lift); }
+
+  .switch {
+    position: relative; width: 46px; height: 27px; border-radius: 14px; flex-shrink: 0;
+    background: var(--panel-3); border: 1px solid var(--line); box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+    transition: background 0.2s var(--ease), border-color 0.2s var(--ease);
+  }
+  .switch-knob {
+    position: absolute; top: 2px; left: 2px; width: 21px; height: 21px; border-radius: 50%;
+    background: #F4F4F2; box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+    transition: transform 0.22s var(--ease);
+  }
+  .switch[aria-checked="true"] { background: var(--accent); border-color: transparent; }
+  .switch[aria-checked="true"] .switch-knob { transform: translateX(19px); }
+  .switch:active .switch-knob { width: 24px; }
   .btn-ghost:active { background: var(--line); }
 
   .hidden-panel { display: none !important; }
@@ -449,7 +465,7 @@
   <div class="panel">
     <div class="field-row">
       <span class="name">Filtro scena intelligente</span>
-      <button class="btn-ghost" id="sceneToggle">Off</button>
+      <button class="switch" id="sceneToggle" role="switch" aria-checked="false"><span class="switch-knob"></span></button>
     </div>
     <div id="sceneControls" class="hidden-panel">
       <div class="ctrl">
@@ -605,7 +621,7 @@
     </div>
     <div class="field-row">
       <span class="name">Scatto vocale</span>
-      <button class="btn-ghost" id="voiceToggleBtn">Off</button>
+      <button class="switch" id="voiceToggleBtn" role="switch" aria-checked="false"><span class="switch-knob"></span></button>
     </div>
     <div class="field-row">
       <span class="name">Parola di attivazione</span>
@@ -614,7 +630,7 @@
     <p class="log-empty" id="voiceHint" style="padding:8px 0 2px; text-align:left; display:none;">In ascolto…</p>
     <div class="field-row">
       <span class="name">Telecomando esterno (tasti fisici)</span>
-      <button class="btn-ghost" id="remoteClickerToggle">Off</button>
+      <button class="switch" id="remoteClickerToggle" role="switch" aria-checked="false"><span class="switch-knob"></span></button>
     </div>
     <p class="log-empty" id="remoteClickerHint" style="padding:8px 0 2px; text-align:left; display:none;">
       Abbina il telecomando dalle impostazioni Bluetooth del telefono
@@ -706,11 +722,47 @@
     <p class="log-empty" style="padding:10px 0 4px; text-align:left;">Stima approssimata per sensore APS-C (fattore di crop 1.5×, come la tua A6100). Oltre questo tempo le stelle iniziano a lasciare scie visibili.</p>
   </div>
 
+  <div class="eyebrow">Bilanciamento del bianco</div>
+  <div class="panel">
+    <div class="field-row" style="flex-wrap:wrap; gap:8px;">
+      <button class="btn-ghost" id="wbAutoBtn" style="flex:1 1 30%;">Auto</button>
+      <button class="btn-ghost" id="wbDaylightBtn" style="flex:1 1 30%;">☀️ Sole</button>
+      <button class="btn-ghost" id="wbCloudyBtn" style="flex:1 1 30%;">☁️ Nuvoloso</button>
+      <button class="btn-ghost" id="wbTungstenBtn" style="flex:1 1 30%;">💡 Tungsteno</button>
+      <button class="btn-ghost" id="wbFluorescentBtn" style="flex:1 1 30%;">🔆 Fluorescente</button>
+    </div>
+    <p class="log-empty" id="wbHint" style="padding:10px 0 4px; text-align:left;">Sperimentale come le altre impostazioni via USB: se un preset non ha effetto, il campo potrebbe avere un nome diverso su questo modello.</p>
+  </div>
+
+  <div class="eyebrow">Bracketing HDR</div>
+  <div class="panel">
+    <div class="field-row">
+      <span class="name">Attivo sul pulsante Scatta</span>
+      <button class="switch" id="bracketToggle" role="switch" aria-checked="false"><span class="switch-knob"></span></button>
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Numero scatti</span></div>
+      <select id="bracketCount" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);width:100%;">
+        <option value="3">3 scatti</option>
+        <option value="5">5 scatti</option>
+      </select>
+    </div>
+    <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Distanza tra scatti</span></div>
+      <select id="bracketSpacing" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);width:100%;">
+        <option value="0.5">0.5 EV</option>
+        <option value="1" selected>1 EV</option>
+        <option value="2">2 EV</option>
+      </select>
+    </div>
+    <p class="log-empty" id="bracketHint" style="padding:10px 0 4px; text-align:left;">Legge il tempo di posa attualmente impostato sulla fotocamera e scatta a scaglioni sopra/sotto quel valore, poi lo ripristina. ISO e apertura restano quelli attuali.</p>
+  </div>
+
   <div class="eyebrow">Galleria scatti (questa sessione)</div>
   <div class="panel">
     <div class="field-row">
       <span class="name">Salva automaticamente sul telefono</span>
-      <button class="btn-ghost" id="autoSaveToggle">Off</button>
+      <button class="switch" id="autoSaveToggle" role="switch" aria-checked="false"><span class="switch-knob"></span></button>
     </div>
     <p class="log-empty" style="padding:8px 0 2px; text-align:left;">
       Ogni scatto è già scaricabile singolarmente qui sotto, in più
@@ -855,7 +907,7 @@
       </div>
       <div class="field-row">
         <span class="name">Intervallo progressivo</span>
-        <button class="btn-ghost" id="intervalRampToggle">Off</button>
+        <button class="switch" id="intervalRampToggle" role="switch" aria-checked="false"><span class="switch-knob"></span></button>
       </div>
       <div id="intervalRampControls" class="hidden-panel">
         <div class="ctrl">
@@ -882,12 +934,12 @@
       </div>
       <div class="field-row">
         <span class="name">Esposizione automatica (segue la luce)</span>
-        <button class="btn-ghost" id="rampingToggle">Off</button>
+        <button class="switch" id="rampingToggle" role="switch" aria-checked="false"><span class="switch-knob"></span></button>
       </div>
       <p class="log-empty" id="rampingHint" style="padding:8px 0 2px; text-align:left; display:none;">Regola il tempo di posa ad ogni scatto in base alla luce rilevata — richiede di aver calibrato l'esposimetro in Fotocamera prima di avviare.</p>
       <div class="field-row">
         <span class="name">Torcia (illumina il primo piano)</span>
-        <button class="btn-ghost" id="torchToggle">Off</button>
+        <button class="switch" id="torchToggle" role="switch" aria-checked="false"><span class="switch-knob"></span></button>
       </div>
       <div class="schedule-status" id="intervalStatus">In attesa di avvio</div>
     </div>
@@ -1000,7 +1052,22 @@
   </div>
 
   <div class="screen scroll-pad" data-screen="log">
-    <div class="log" id="log" style="margin-top:64px;"></div>
+    <div class="panel" style="margin-top:64px;">
+      <div class="field-row">
+        <span class="name">Esporta registro (file .txt)</span>
+        <button class="btn-ghost" id="exportLogBtn">Esporta</button>
+      </div>
+      <div class="field-row">
+        <span class="name">Backup impostazioni (.json)</span>
+        <button class="btn-ghost" id="exportSettingsBtn">Esporta</button>
+      </div>
+      <div class="field-row">
+        <span class="name">Ripristina da backup</span>
+        <button class="btn-ghost" id="importSettingsBtn">Importa</button>
+      </div>
+      <input type="file" id="importSettingsFile" accept="application/json" class="hidden-panel">
+    </div>
+    <div class="log" id="log"></div>
   </div>
 
   <div class="screen scroll-pad" data-screen="scenepresets">
@@ -1177,6 +1244,19 @@ const VECTOR_SIZE = 64;
 const MOTION_CELLS = MOTION_COLS * MOTION_ROWS;
 let motionTraceBuffer = [];
 const ZONE_COUNT = GRID_COLS * GRID_ROWS;
+
+// Buffer riutilizzati ad ogni fotogramma di analisi (svuotati con .fill(0)
+// invece di essere ricreati da zero 15 volte al secondo) — meno lavoro per
+// il garbage collector, stessa cosa vista da chi legge il resto del codice.
+const zoneSumsBuf = new Float32Array(ZONE_COUNT);
+const zoneCountsBuf = new Uint32Array(ZONE_COUNT);
+const histCountsBuf = new Uint32Array(HIST_BINS);
+const histRCountsBuf = new Uint32Array(HIST_BINS);
+const histGCountsBuf = new Uint32Array(HIST_BINS);
+const histBCountsBuf = new Uint32Array(HIST_BINS);
+const vectorBucketsBuf = new Uint16Array(VECTOR_SIZE * VECTOR_SIZE);
+const motionSumsBuf = new Float32Array(MOTION_CELLS);
+const motionCountsBuf = new Uint32Array(MOTION_CELLS);
 let zoneBaseline = new Array(ZONE_COUNT).fill(null);
 let prevDelta = 0;
 
@@ -1717,11 +1797,11 @@ const MAX_GALLERY_ITEMS = 30;
 let capturedGallery = []; // { url, name, time }
 let autoSaveOn = localStorage.getItem('ft_autosave_on') === '1';
 const autoSaveToggle = document.getElementById('autoSaveToggle');
-autoSaveToggle.textContent = autoSaveOn ? 'On' : 'Off';
+autoSaveToggle.setAttribute('aria-checked', autoSaveOn ? 'true' : 'false');
 autoSaveToggle.onclick = () => {
   autoSaveOn = !autoSaveOn;
   localStorage.setItem('ft_autosave_on', autoSaveOn ? '1' : '0');
-  autoSaveToggle.textContent = autoSaveOn ? 'On' : 'Off';
+  autoSaveToggle.setAttribute('aria-checked', autoSaveOn ? 'true' : 'false');
 };
 
 function handleCapturedFile(file) {
@@ -2343,12 +2423,110 @@ setInterval(() => {
 // ---------- scatto diretto dalla schermata Fotocamera ----------
 const cameraShootBtn = document.getElementById('cameraShootBtn');
 
+// ---------- bilanciamento del bianco ----------
+const wbHint = document.getElementById('wbHint');
+async function applyWhiteBalance(name, value) {
+  if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
+  try {
+    await withCameraLock(() => camera.setConfigValue('whitebalance', value));
+    log('ok', `Bilanciamento del bianco: ${name}`);
+    wbHint.textContent = `Applicato: ${name}.`;
+  } catch (e) {
+    log('error', `Bilanciamento del bianco non applicato: ${e.message}`);
+    wbHint.textContent = 'Il campo "whitebalance" potrebbe chiamarsi diversamente su questo modello — vedi il Registro eventi.';
+  }
+}
+document.getElementById('wbAutoBtn').onclick = () => applyWhiteBalance('Auto', 'Auto');
+document.getElementById('wbDaylightBtn').onclick = () => applyWhiteBalance('Sole', 'Daylight');
+document.getElementById('wbCloudyBtn').onclick = () => applyWhiteBalance('Nuvoloso', 'Cloudy');
+document.getElementById('wbTungstenBtn').onclick = () => applyWhiteBalance('Tungsteno', 'Tungsten');
+document.getElementById('wbFluorescentBtn').onclick = () => applyWhiteBalance('Fluorescente', 'Fluorescent');
+
+// ---------- bracketing HDR ----------
+const bracketToggle = document.getElementById('bracketToggle');
+const bracketCountEl = document.getElementById('bracketCount');
+const bracketSpacingEl = document.getElementById('bracketSpacing');
+const bracketHint = document.getElementById('bracketHint');
+let bracketOn = false;
+bracketToggle.onclick = () => {
+  bracketOn = !bracketOn;
+  bracketToggle.setAttribute('aria-checked', bracketOn ? 'true' : 'false');
+};
+
+/** Cerca ricorsivamente, nello stesso albero restituito da camera.getConfig()
+ * usato per "Impostazioni manuali", il campo con questo nome e ne
+ * restituisce il valore grezzo — stessa logica difensiva, riusata qui per
+ * leggere il tempo di posa attuale prima di un bracketing. */
+function findConfigFieldValue(node, fieldName, path = '') {
+  if (node == null || typeof node !== 'object') return null;
+  const entries = Array.isArray(node) ? node.map((v, i) => [String(i), v]) : Object.entries(node);
+  for (const [key, val] of entries) {
+    if (val == null || typeof val !== 'object') continue;
+    if ((val.name === fieldName || key === fieldName) && 'value' in val) return val.value;
+    const childSet = val.children || val.fields || (Array.isArray(val) ? val : null);
+    const found = findConfigFieldValue(childSet || val, fieldName);
+    if (found != null) return found;
+  }
+  return null;
+}
+
+function parseShutterString(s) {
+  if (s == null) return null;
+  s = String(s).trim();
+  if (s.includes('/')) {
+    const [num, den] = s.split('/').map(Number);
+    if (den) return num / den;
+  }
+  const v = parseFloat(s);
+  return isFinite(v) && v > 0 ? v : null;
+}
+
+async function fireBracketedShot() {
+  if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return { ok: false, message: 'Fotocamera non connessa' }; }
+  let baseSec;
+  try {
+    const config = await withCameraLock(() => camera.getConfig());
+    baseSec = parseShutterString(findConfigFieldValue(config, 'shutterspeed'));
+  } catch (e) {
+    log('error', 'Bracketing: impossibile leggere il tempo attuale — ' + e.message);
+    return { ok: false, message: 'Lettura tempo fallita' };
+  }
+  if (baseSec == null) {
+    log('error', 'Bracketing: non ho trovato il tempo di posa attuale sulla fotocamera — annullato');
+    return { ok: false, message: 'Tempo di posa non trovato' };
+  }
+  const shots = parseInt(bracketCountEl.value, 10);
+  const spacing = parseFloat(bracketSpacingEl.value);
+  const half = Math.floor(shots / 2);
+  let okCount = 0;
+  for (let i = -half; i <= half; i++) {
+    const sec = baseSec * Math.pow(2, i * spacing);
+    const label = sec < 1 ? `1/${Math.round(1 / sec)}` : sec.toFixed(1);
+    try {
+      await withCameraLock(() => camera.setConfigValue('shutterspeed', label));
+      const result = await fireShutter(1, 0);
+      const evLabel = i === 0 ? '0EV' : (i > 0 ? `+${i * spacing}EV` : `${i * spacing}EV`);
+      log(result.ok ? 'ok' : 'error', `Bracketing ${evLabel} (${label}s): ${result.message}`);
+      if (result.ok) okCount++;
+    } catch (e) {
+      log('error', 'Bracketing: scatto fallito — ' + e.message);
+    }
+  }
+  try {
+    const restoreLabel = baseSec < 1 ? `1/${Math.round(1 / baseSec)}` : baseSec.toFixed(1);
+    await withCameraLock(() => camera.setConfigValue('shutterspeed', restoreLabel));
+  } catch (e) { /* non critico se il ripristino fallisce, l'utente può reimpostarlo a mano */ }
+  return { ok: okCount > 0, message: `Bracketing completato: ${okCount}/${shots} scatti riusciti` };
+}
+
 cameraShootBtn.onclick = async () => {
   if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
   cameraShootBtn.disabled = true;
   const timerSec = parseInt(selfTimerSelect.value, 10);
   if (timerSec > 0) await runCountdown(timerSec);
-  const result = await fireShutter(parseInt(manualBurstCountEl.value, 10), parseInt(manualBurstIntervalEl.value, 10));
+  const result = bracketOn
+    ? await fireBracketedShot()
+    : await fireShutter(parseInt(manualBurstCountEl.value, 10), parseInt(manualBurstIntervalEl.value, 10));
   log(result.ok ? 'ok' : 'error', result.message);
   if (result.ok) recordFlashEventSilent();
   cameraShootBtn.disabled = false;
@@ -2372,7 +2550,7 @@ voiceWordInput.value = localStorage.getItem('ft_voice_word') || 'scatta';
 voiceWordInput.onchange = () => localStorage.setItem('ft_voice_word', voiceWordInput.value.trim().toLowerCase());
 
 function applyVoiceUI() {
-  voiceToggleBtn.textContent = voiceOn ? 'On' : 'Off';
+  voiceToggleBtn.setAttribute('aria-checked', voiceOn ? 'true' : 'false');
   voiceHint.style.display = voiceOn ? 'block' : 'none';
 }
 
@@ -2470,7 +2648,7 @@ function onRemoteClickerKeydown(e) {
 }
 
 function applyRemoteClickerUI() {
-  remoteClickerToggle.textContent = remoteClickerOn ? 'On' : 'Off';
+  remoteClickerToggle.setAttribute('aria-checked', remoteClickerOn ? 'true' : 'false');
   remoteClickerHint.style.display = remoteClickerOn ? 'block' : 'none';
 }
 applyRemoteClickerUI();
@@ -2510,7 +2688,7 @@ let requireSudden = localStorage.getItem('ft_scene_sudden') !== '0';
 uniformityMinEl.value = localStorage.getItem('ft_uniformity_min') || 50;
 
 function applySceneUI() {
-  sceneToggle.textContent = sceneFilterOn ? 'On' : 'Off';
+  sceneToggle.setAttribute('aria-checked', sceneFilterOn ? 'true' : 'false');
   sceneControls.classList.toggle('hidden-panel', !sceneFilterOn);
   suddenToggle.textContent = requireSudden ? 'Sì' : 'No';
   uniformityMinVal.textContent = uniformityMinEl.value + '%';
@@ -2580,6 +2758,7 @@ beamCooldownEl.oninput = () => { syncBeamLabels(); localStorage.setItem('ft_beam
 beamBurstCountEl.oninput = () => { syncBeamLabels(); localStorage.setItem('ft_beam_burst_count', beamBurstCountEl.value); };
 beamBurstIntervalEl.oninput = () => { syncBeamLabels(); localStorage.setItem('ft_beam_burst_interval', beamBurstIntervalEl.value); };
 
+let fullLogHistory = []; // cronologia più ampia della sola vista a schermo, usata per l'esportazione
 function log(kind, text) {
   const time = new Date().toLocaleTimeString('it-IT', { hour12: false }) + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
   const row = document.createElement('div');
@@ -2588,7 +2767,70 @@ function log(kind, text) {
   if (logEl.querySelector('.log-empty')) logEl.innerHTML = '';
   logEl.prepend(row);
   while (logEl.children.length > 30) logEl.removeChild(logEl.lastChild);
+
+  fullLogHistory.push(`[${time}] [${kind}] ${text}`);
+  while (fullLogHistory.length > 500) fullLogHistory.shift();
 }
+
+// ---------- rete di sicurezza globale: nessun errore deve fallire in silenzio ----------
+let globalErrorCount = 0;
+window.addEventListener('error', (event) => {
+  globalErrorCount++;
+  if (globalErrorCount <= 10) {
+    log('error', `Errore imprevisto: ${event.message} (${(event.filename || '').split('/').pop()}:${event.lineno || '?'})`);
+  }
+});
+window.addEventListener('unhandledrejection', (event) => {
+  globalErrorCount++;
+  if (globalErrorCount <= 10) {
+    const reason = event.reason && event.reason.message ? event.reason.message : String(event.reason);
+    log('error', `Operazione fallita senza gestione: ${reason}`);
+  }
+});
+
+// ---------- esportazione registro e backup/ripristino impostazioni ----------
+document.getElementById('exportLogBtn').onclick = () => {
+  const text = fullLogHistory.join('\n') || 'Registro vuoto.';
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  downloadFile(url, `registro-flash-trigger-${stamp}.txt`);
+};
+
+document.getElementById('exportSettingsBtn').onclick = () => {
+  const settings = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith('ft_')) settings[key] = localStorage.getItem(key);
+  }
+  const blob = new Blob([JSON.stringify(settings, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  downloadFile(url, `backup-impostazioni-${stamp}.json`);
+  log('ok', `Backup impostazioni esportato (${Object.keys(settings).length} valori)`);
+};
+
+document.getElementById('importSettingsBtn').onclick = () => {
+  document.getElementById('importSettingsFile').click();
+};
+document.getElementById('importSettingsFile').onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const settings = JSON.parse(text);
+    let count = 0;
+    Object.keys(settings).forEach(key => {
+      if (key.startsWith('ft_')) { localStorage.setItem(key, settings[key]); count++; }
+    });
+    log('ok', `Ripristinati ${count} valori dal backup — ricarico l'app per applicarli...`);
+    setTimeout(() => location.reload(), 1200);
+  } catch (err) {
+    log('error', 'Backup non valido o corrotto: ' + err.message);
+  } finally {
+    e.target.value = '';
+  }
+};
 
 function resizeTrace() {
   const rect = traceCanvas.getBoundingClientRect();
@@ -2774,20 +3016,33 @@ function analyzeLoop(timestamp) {
   }
   lastAnalyzeTime = timestamp;
 
+  try {
+    analyzeFrame();
+  } catch (e) {
+    analyzeErrorCount++;
+    if (analyzeErrorCount <= 3 || analyzeErrorCount % 50 === 0) {
+      log('error', `Ciclo di analisi: errore su un fotogramma (${e.message}) — continuo comunque, non dovrebbe bloccare il rilevamento`);
+    }
+  }
+  requestAnimationFrame(analyzeLoop);
+}
+let analyzeErrorCount = 0;
+
+function analyzeFrame() {
   if (video.readyState >= 2) {
     actx.drawImage(video, 0, 0, analyzeCanvas.width, analyzeCanvas.height);
     const frame = actx.getImageData(0, 0, analyzeCanvas.width, analyzeCanvas.height).data;
     const w = analyzeCanvas.width, h = analyzeCanvas.height;
     const zoneW = w / GRID_COLS, zoneH = h / GRID_ROWS;
-    const zoneSums = new Array(ZONE_COUNT).fill(0);
-    const zoneCounts = new Array(ZONE_COUNT).fill(0);
-    const histCounts = new Array(HIST_BINS).fill(0);
-    const histRCounts = new Array(HIST_BINS).fill(0);
-    const histGCounts = new Array(HIST_BINS).fill(0);
-    const histBCounts = new Array(HIST_BINS).fill(0);
-    const vectorBuckets = new Uint16Array(VECTOR_SIZE * VECTOR_SIZE);
-    const motionSums = new Array(MOTION_CELLS).fill(0);
-    const motionCounts = new Array(MOTION_CELLS).fill(0);
+    const zoneSums = zoneSumsBuf.fill(0);
+    const zoneCounts = zoneCountsBuf.fill(0);
+    const histCounts = histCountsBuf.fill(0);
+    const histRCounts = histRCountsBuf.fill(0);
+    const histGCounts = histGCountsBuf.fill(0);
+    const histBCounts = histBCountsBuf.fill(0);
+    const vectorBuckets = vectorBucketsBuf.fill(0);
+    const motionSums = motionSumsBuf.fill(0);
+    const motionCounts = motionCountsBuf.fill(0);
     const motionCellW = w / MOTION_COLS, motionCellH = h / MOTION_ROWS;
     let sum = 0, count = 0;
     const step = 8; // campiona il doppio dei pixel di prima: meno rumore, più sensibilità ai cali/aumenti reali
@@ -2915,7 +3170,6 @@ function analyzeLoop(timestamp) {
       }
     }
   }
-  requestAnimationFrame(analyzeLoop);
 }
 
 async function onFlashDetected() {
@@ -3127,7 +3381,7 @@ const rampingHint = document.getElementById('rampingHint');
 let rampingOn = localStorage.getItem('ft_ramping_on') === '1';
 
 function applyRampingUI() {
-  rampingToggle.textContent = rampingOn ? 'On' : 'Off';
+  rampingToggle.setAttribute('aria-checked', rampingOn ? 'true' : 'false');
   rampingHint.style.display = rampingOn ? 'block' : 'none';
 }
 applyRampingUI();
@@ -3151,7 +3405,7 @@ intervalRampStartEl.value = localStorage.getItem('ft_interval_ramp_start') || 5;
 intervalRampEndEl.value = localStorage.getItem('ft_interval_ramp_end') || 30;
 
 function applyIntervalRampUI() {
-  intervalRampToggle.textContent = intervalRampOn ? 'On' : 'Off';
+  intervalRampToggle.setAttribute('aria-checked', intervalRampOn ? 'true' : 'false');
   intervalRampControls.classList.toggle('hidden-panel', !intervalRampOn);
   intervalRampHint.style.display = intervalRampOn ? 'block' : 'none';
   intervalSecEl.disabled = intervalRampOn; // con la rampa attiva, l'intervallo fisso non si usa
@@ -3195,7 +3449,7 @@ torchToggle.onclick = async () => {
   try {
     torchOn = !torchOn;
     await track.applyConstraints({ advanced: [{ torch: torchOn }] });
-    torchToggle.textContent = torchOn ? 'On' : 'Off';
+    torchToggle.setAttribute('aria-checked', torchOn ? 'true' : 'false');
   } catch (e) {
     torchOn = !torchOn; // annulla il toggle logico se il comando è fallito
     log('error', 'Impossibile controllare la torcia: ' + e.message);
