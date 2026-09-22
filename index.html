@@ -603,6 +603,13 @@
   <div class="eyebrow">Scatto manuale</div>
   <div class="panel">
     <div class="ctrl">
+      <div class="ctrl-head"><span class="name">Sorgente scatto</span></div>
+      <select id="shootSourceSelect" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);width:100%;">
+        <option value="camera">A6100 (USB/Bluetooth)</option>
+        <option value="phone">Fotocamera del telefono</option>
+      </select>
+    </div>
+    <div class="ctrl">
       <div class="ctrl-head"><span class="name">Autoscatto</span></div>
       <select id="selfTimerSelect" style="background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-display);width:100%;">
         <option value="0">Off</option>
@@ -1853,6 +1860,10 @@ function renderGallery() {
 
 
 async function fireShutter(burstCount = 1, burstIntervalMs = 0) {
+  if (shootSourceSelect && shootSourceSelect.value === 'phone') {
+    return firePhoneShutter(burstCount, burstIntervalMs);
+  }
+
   if (bleConnected) {
     burstCount = Math.max(1, burstCount);
     try {
@@ -2421,6 +2432,93 @@ setInterval(() => {
 }, 150);
 
 // ---------- scatto diretto dalla schermata Fotocamera ----------
+// --------------------------------------------------------------------
+// SCATTO DAL TELEFONO — usa l'API ImageCapture del browser per prendere
+// una foto vera ad alta risoluzione dal sensore del telefono (non
+// l'anteprima ridotta usata per il rilevamento). Dove il browser lo
+// supporta, bracketing e bilanciamento del bianco usano i vincoli della
+// traccia video (exposureCompensation/whiteBalanceMode) — supporto
+// incostante a seconda di telefono/Chrome, con ricaduta onesta se manca.
+// --------------------------------------------------------------------
+const shootSourceSelect = document.getElementById('shootSourceSelect');
+shootSourceSelect.value = localStorage.getItem('ft_shoot_source') || 'camera';
+shootSourceSelect.onchange = () => localStorage.setItem('ft_shoot_source', shootSourceSelect.value);
+
+function getPhoneVideoTrack() {
+  const stream = currentPhoneStream;
+  return stream ? stream.getVideoTracks()[0] : null;
+}
+
+async function firePhoneShutter(burstCount = 1, burstIntervalMs = 0) {
+  const track = getPhoneVideoTrack();
+  if (!track) return { ok: false, message: 'Fotocamera del telefono non disponibile' };
+  if (!('ImageCapture' in window)) return { ok: false, message: 'ImageCapture non supportata su questo browser' };
+  burstCount = Math.max(1, burstCount);
+  try {
+    const imageCapture = new ImageCapture(track);
+    for (let i = 0; i < burstCount; i++) {
+      const t0 = performance.now();
+      const blob = await imageCapture.takePhoto();
+      const dt = Math.round(performance.now() - t0);
+      const file = new File([blob], `telefono-${Date.now()}.jpg`, { type: blob.type || 'image/jpeg' });
+      handleCapturedFile(file);
+      if (burstCount > 1) log('ok', `Scatto telefono ${i + 1}/${burstCount} in ${dt} ms`);
+      else log('ok', `Scatto telefono in ${dt} ms`);
+      if (i < burstCount - 1 && burstIntervalMs > 0) await new Promise(r => setTimeout(r, burstIntervalMs));
+    }
+    return { ok: true, message: 'Scatto riuscito (telefono)' };
+  } catch (e) {
+    return { ok: false, message: 'Errore scatto telefono: ' + e.message };
+  }
+}
+
+async function firePhoneBracketedShot() {
+  const track = getPhoneVideoTrack();
+  if (!track) return { ok: false, message: 'Fotocamera del telefono non disponibile' };
+  const caps = track.getCapabilities ? track.getCapabilities() : {};
+  if (!caps.exposureCompensation) {
+    log('error', 'Il bracketing via telefono richiede il controllo di compensazione esposizione, non supportato su questo dispositivo — provo comunque uno scatto singolo');
+    return firePhoneShutter(1, 0);
+  }
+  const shots = parseInt(bracketCountEl.value, 10);
+  const spacingEV = parseFloat(bracketSpacingEl.value);
+  const half = Math.floor(shots / 2);
+  const mid = (caps.exposureCompensation.min + caps.exposureCompensation.max) / 2;
+  const step = (caps.exposureCompensation.step || 0.33);
+  let okCount = 0;
+  for (let i = -half; i <= half; i++) {
+    const value = Math.max(caps.exposureCompensation.min, Math.min(caps.exposureCompensation.max, mid + i * spacingEV / step));
+    try {
+      await track.applyConstraints({ advanced: [{ exposureCompensation: value }] });
+      await new Promise(r => setTimeout(r, 200)); // lascia il tempo al sensore di adattarsi
+      const result = await firePhoneShutter(1, 0);
+      log(result.ok ? 'ok' : 'error', `Bracketing telefono ${i > 0 ? '+' : ''}${i * spacingEV}EV: ${result.message}`);
+      if (result.ok) okCount++;
+    } catch (e) { log('error', 'Bracketing telefono: ' + e.message); }
+  }
+  try { await track.applyConstraints({ advanced: [{ exposureCompensation: mid }] }); } catch (e) { /* non critico */ }
+  return { ok: okCount > 0, message: `Bracketing telefono completato: ${okCount}/${shots} scatti riusciti` };
+}
+
+async function applyPhoneWhiteBalance(name, mode, kelvin) {
+  const track = getPhoneVideoTrack();
+  if (!track) { log('error', 'Fotocamera del telefono non disponibile'); return; }
+  const caps = track.getCapabilities ? track.getCapabilities() : {};
+  if (!caps.whiteBalanceMode) {
+    log('error', 'Il bilanciamento del bianco non è controllabile su questa fotocamera del telefono/browser');
+    return;
+  }
+  try {
+    const constraint = { whiteBalanceMode: mode };
+    if (mode === 'manual' && kelvin && caps.colorTemperature) constraint.colorTemperature = kelvin;
+    await track.applyConstraints({ advanced: [constraint] });
+    log('ok', `Bilanciamento del bianco (telefono): ${name}`);
+    wbHint.textContent = `Applicato: ${name} (telefono).`;
+  } catch (e) {
+    log('error', 'Bilanciamento del bianco (telefono) non applicato: ' + e.message);
+  }
+}
+
 const cameraShootBtn = document.getElementById('cameraShootBtn');
 
 // ---------- bilanciamento del bianco ----------
@@ -2436,11 +2534,16 @@ async function applyWhiteBalance(name, value) {
     wbHint.textContent = 'Il campo "whitebalance" potrebbe chiamarsi diversamente su questo modello — vedi il Registro eventi.';
   }
 }
-document.getElementById('wbAutoBtn').onclick = () => applyWhiteBalance('Auto', 'Auto');
-document.getElementById('wbDaylightBtn').onclick = () => applyWhiteBalance('Sole', 'Daylight');
-document.getElementById('wbCloudyBtn').onclick = () => applyWhiteBalance('Nuvoloso', 'Cloudy');
-document.getElementById('wbTungstenBtn').onclick = () => applyWhiteBalance('Tungsteno', 'Tungsten');
-document.getElementById('wbFluorescentBtn').onclick = () => applyWhiteBalance('Fluorescente', 'Fluorescent');
+document.getElementById('wbAutoBtn').onclick = () =>
+  shootSourceSelect.value === 'phone' ? applyPhoneWhiteBalance('Auto', 'continuous') : applyWhiteBalance('Auto', 'Auto');
+document.getElementById('wbDaylightBtn').onclick = () =>
+  shootSourceSelect.value === 'phone' ? applyPhoneWhiteBalance('Sole', 'manual', 5500) : applyWhiteBalance('Sole', 'Daylight');
+document.getElementById('wbCloudyBtn').onclick = () =>
+  shootSourceSelect.value === 'phone' ? applyPhoneWhiteBalance('Nuvoloso', 'manual', 6500) : applyWhiteBalance('Nuvoloso', 'Cloudy');
+document.getElementById('wbTungstenBtn').onclick = () =>
+  shootSourceSelect.value === 'phone' ? applyPhoneWhiteBalance('Tungsteno', 'manual', 3200) : applyWhiteBalance('Tungsteno', 'Tungsten');
+document.getElementById('wbFluorescentBtn').onclick = () =>
+  shootSourceSelect.value === 'phone' ? applyPhoneWhiteBalance('Fluorescente', 'manual', 4000) : applyWhiteBalance('Fluorescente', 'Fluorescent');
 
 // ---------- bracketing HDR ----------
 const bracketToggle = document.getElementById('bracketToggle');
@@ -2519,13 +2622,18 @@ async function fireBracketedShot() {
   return { ok: okCount > 0, message: `Bracketing completato: ${okCount}/${shots} scatti riusciti` };
 }
 
+async function fireBracket() {
+  return (shootSourceSelect.value === 'phone') ? firePhoneBracketedShot() : fireBracketedShot();
+}
+
 cameraShootBtn.onclick = async () => {
-  if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
+  const usePhone = shootSourceSelect.value === 'phone';
+  if (!usePhone && !cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
   cameraShootBtn.disabled = true;
   const timerSec = parseInt(selfTimerSelect.value, 10);
   if (timerSec > 0) await runCountdown(timerSec);
   const result = bracketOn
-    ? await fireBracketedShot()
+    ? await fireBracket()
     : await fireShutter(parseInt(manualBurstCountEl.value, 10), parseInt(manualBurstIntervalEl.value, 10));
   log(result.ok ? 'ok' : 'error', result.message);
   if (result.ok) recordFlashEventSilent();
@@ -2632,7 +2740,7 @@ async function triggerRemoteClickerShot(sourceLabel) {
   if (now - lastRemoteClickerTrigger < 800) return; // scarta doppi segnali dallo stesso click
   lastRemoteClickerTrigger = now;
   remoteClickerLastEvent.textContent = `Ultimo segnale: ${sourceLabel} alle ${new Date().toLocaleTimeString('it-IT', { hour12: false })}`;
-  if (!cameraConnected && !bleConnected) { log('error', 'Telecomando rilevato ma fotocamera non connessa'); return; }
+  if (shootSourceSelect.value !== 'phone' && !cameraConnected && !bleConnected) { log('error', 'Telecomando rilevato ma fotocamera non connessa'); return; }
   const result = await fireShutter(parseInt(manualBurstCountEl.value, 10), parseInt(manualBurstIntervalEl.value, 10));
   log(result.ok ? 'ok' : 'error', 'Telecomando esterno → ' + result.message);
   if (result.ok) recordFlashEventSilent();
@@ -3173,7 +3281,7 @@ function analyzeFrame() {
 }
 
 async function onFlashDetected() {
-  if (!cameraConnected && !bleConnected) { log('error', 'Fotocamera non connessa'); return; }
+  if (shootSourceSelect.value !== 'phone' && !cameraConnected && !bleConnected) { log('error', 'Fotocamera non connessa'); return; }
   log('trigger', 'Lampo rilevato → scatto');
   const delayMs = parseInt(delayEl.value, 10);
   if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
@@ -3183,7 +3291,7 @@ async function onFlashDetected() {
 }
 
 async function onMotionDetected() {
-  if (!cameraConnected && !bleConnected) { log('error', 'Fotocamera non connessa'); return; }
+  if (shootSourceSelect.value !== 'phone' && !cameraConnected && !bleConnected) { log('error', 'Fotocamera non connessa'); return; }
   log('trigger', 'Movimento rilevato → scatto');
   const delayMs = parseInt(motionDelayEl.value, 10);
   if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
@@ -3193,7 +3301,7 @@ async function onMotionDetected() {
 }
 
 async function onBeamDetected() {
-  if (!cameraConnected && !bleConnected) { log('error', 'Fotocamera non connessa'); return; }
+  if (shootSourceSelect.value !== 'phone' && !cameraConnected && !bleConnected) { log('error', 'Fotocamera non connessa'); return; }
   log('trigger', 'Raggio interrotto → scatto');
   const delayMs = parseInt(beamDelayEl.value, 10);
   if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
@@ -3257,7 +3365,7 @@ function updateShutterUI() {
 
 shutterBtn.onclick = () => {
   if (mode === 'flash') {
-    if (!cameraConnected && !bleConnected) { log('error', 'Connetti prima la fotocamera (menu → Fotocamera)'); return; }
+    if (shootSourceSelect.value !== 'phone' && !cameraConnected && !bleConnected) { log('error', 'Connetti prima la fotocamera (menu → Fotocamera)'); return; }
     armed = !armed;
     log(armed ? 'trigger' : 'ok', armed ? 'Sistema armato' : 'Sistema disattivato');
     updateShutterUI();
@@ -3266,12 +3374,12 @@ shutterBtn.onclick = () => {
   } else if (mode === 'sun') {
     if (scheduleActive && scheduleMode === 'sun') stopSchedule(); else startSun();
   } else if (mode === 'motion') {
-    if (!cameraConnected && !bleConnected) { log('error', 'Connetti prima la fotocamera (menu → Fotocamera)'); return; }
+    if (shootSourceSelect.value !== 'phone' && !cameraConnected && !bleConnected) { log('error', 'Connetti prima la fotocamera (menu → Fotocamera)'); return; }
     motionArmed = !motionArmed;
     log(motionArmed ? 'trigger' : 'ok', motionArmed ? 'Sistema armato (movimento)' : 'Sistema disattivato');
     updateShutterUI();
   } else if (mode === 'beam') {
-    if (!cameraConnected && !bleConnected) { log('error', 'Connetti prima la fotocamera (menu → Fotocamera)'); return; }
+    if (shootSourceSelect.value !== 'phone' && !cameraConnected && !bleConnected) { log('error', 'Connetti prima la fotocamera (menu → Fotocamera)'); return; }
     beamArmed = !beamArmed;
     log(beamArmed ? 'trigger' : 'ok', beamArmed ? 'Sistema armato (raggio)' : 'Sistema disattivato');
     updateShutterUI();
@@ -3459,7 +3567,7 @@ torchToggle.onclick = async () => {
 const intervalStartDelayEl = document.getElementById('intervalStartDelay');
 
 function startInterval() {
-  if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
+  if (shootSourceSelect.value !== 'phone' && !cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
   if (rampingOn && !meterCal) {
     log('error', "Esposizione automatica attiva ma l'esposimetro non è calibrato — vai su Fotocamera e tocca \"Calibra qui\" prima di avviare");
     return;
@@ -3678,7 +3786,7 @@ function computeSunTarget(lat, lon, event, offsetMin) {
 }
 
 function startSun() {
-  if (!cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
+  if (shootSourceSelect.value !== 'phone' && !cameraConnected) { log('error', 'Connetti prima la fotocamera'); return; }
   if (!gpsCoords) { log('error', 'Rileva prima la posizione GPS'); return; }
   const target = computeSunTarget(gpsCoords.lat, gpsCoords.lon, sunEvent, parseInt(sunOffsetEl.value, 10));
   if (!target) { log('error', "Impossibile calcolare l'orario per questa posizione"); return; }
