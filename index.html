@@ -16,30 +16,45 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0E0F13;
-    --panel: #17181D;
-    --panel-2: #1E2026;
-    --line: #2A2C33;
-    --text: #F2F2F5;
-    --muted: #83868F;
-    --muted-2: #55575F;
-    --accent: #F0A93C;
-    --accent-dim: #6B551F;
-    --live: #FF5B45;
-    --live-dim: #4A241D;
-    --trace: #57D6C4;
-    --wild: #8BC34A;
-    --beam: #FF3D8F;
+    --bg: #08090C;
+    --bg-2: #0D0E12;
+    --panel: #131419;
+    --panel-2: #191A20;
+    --panel-3: #212228;
+    --line: #26272E;
+    --line-soft: #1C1D23;
+    --text: #F2F2F4;
+    --muted: #86888F;
+    --muted-2: #504F56;
+    --accent: #E8A23D;
+    --accent-2: #F2B85F;
+    --accent-dim: #4A3A1A;
+    --live: #E0664F;
+    --live-2: #EB8870;
+    --live-dim: #3D241C;
+    --trace: #4FBFAC;
+    --trace-2: #7ED4C4;
+    --wild: #85B863;
+    --beam: #CE5088;
+    --glass: rgba(19,20,25,0.72);
+    --glass-strong: rgba(13,14,18,0.85);
+    --shadow-soft: 0 10px 30px rgba(0,0,0,0.45);
+    --shadow-lift: 0 1px 6px rgba(0,0,0,0.3);
+    --ease: cubic-bezier(0.22, 1, 0.36, 1);
     --font-display: 'Space Grotesk', -apple-system, sans-serif;
     --font-body: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
-    margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    margin: 0; height: 100%; color: var(--text);
+    background: radial-gradient(ellipse 100% 50% at 50% -8%, #121319 0%, var(--bg) 60%);
     font-family: var(--font-body);
     overscroll-behavior: none;
   }
   body { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+  button { font-family: inherit; transition: transform 0.12s var(--ease), background 0.18s var(--ease), border-color 0.18s var(--ease), color 0.18s var(--ease), box-shadow 0.18s var(--ease); }
+  button:active { transform: scale(0.96); }
+  svg.icon { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; display: block; }
 
   /* ---------- header ---------- */
   header {
@@ -56,7 +71,7 @@
     background: var(--panel); color: var(--text); font-size: 16px;
     display: flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
-  header.overlay-header .icon-btn { background: rgba(23,24,29,0.7); border-color: rgba(255,255,255,0.1); backdrop-filter: blur(4px); }
+  header.overlay-header .icon-btn { background: rgba(23,24,29,0.7); border-color: rgba(255,255,255,0.1); backdrop-filter: blur(16px) saturate(1.5); }
   .icon-btn:active { background: var(--panel-2); }
   .header-title {
     font-family: var(--font-display); font-weight: 700; font-size: 17px;
@@ -80,8 +95,9 @@
   .overlay.open { opacity: 1; pointer-events: auto; }
   .drawer {
     position: fixed; top: 0; bottom: 0; left: 0; width: 78%; max-width: 300px;
-    background: var(--panel); border-right: 1px solid var(--line);
-    transform: translateX(-100%); transition: transform 0.22s ease; z-index: 41;
+    background: linear-gradient(180deg, var(--panel-2), var(--panel) 30%); border-right: 1px solid var(--line);
+    box-shadow: 12px 0 32px rgba(0,0,0,0.4);
+    transform: translateX(-100%); transition: transform 0.3s var(--ease); z-index: 41;
     display: flex; flex-direction: column; overflow-y: auto;
     padding: max(20px, env(safe-area-inset-top)) 0 max(16px, env(safe-area-inset-bottom));
   }
@@ -92,7 +108,7 @@
   .drawer-section { font-family: var(--font-display); font-size: 10.5px; font-weight: 600; letter-spacing: 0.09em; color: var(--muted-2); text-transform: uppercase; padding: 14px 20px 6px; }
   .drawer-item { display: flex; align-items: center; gap: 12px; padding: 13px 20px; border: none; background: transparent; color: var(--text); font-family: var(--font-body); font-size: 14.5px; font-weight: 500; width: 100%; text-align: left; }
   .drawer-item .tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-2); flex-shrink: 0; }
-  .drawer-item.active { background: var(--panel-2); }
+  .drawer-item.active { background: linear-gradient(90deg, rgba(255,255,255,0.06), transparent); box-shadow: inset 3px 0 0 var(--accent); }
   .drawer-item.active .tab-dot.flash { background: var(--live); }
   .drawer-item.active .tab-dot.interval { background: var(--trace); }
   .drawer-item.active .tab-dot.sun { background: var(--accent); }
@@ -112,9 +128,9 @@
   /* ---------- screens ---------- */
   .screens { flex: 1; overflow: hidden; position: relative; }
   .screen { position: absolute; inset: 0; overflow-y: auto; display: none; flex-direction: column; }
-  .screen.active { display: flex; animation: screenIn 0.18s ease; }
+  .screen.active { display: flex; animation: screenIn 0.28s var(--ease); }
   .screen.scroll-pad { padding-bottom: 16px; }
-  @keyframes screenIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes screenIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
   /* ---------- viewfinder (schermata Flash, stile fotocamera) ---------- */
   #screen-flash, #screen-camera, #screen-motion, #screen-beam { overflow: hidden; }
@@ -130,14 +146,14 @@
     font-family: var(--font-display); font-weight: 600; font-size: 13px;
     color: var(--trace); font-variant-numeric: tabular-nums;
     display: flex; align-items: baseline; gap: 5px;
-    background: rgba(0,0,0,0.35); padding: 5px 10px; border-radius: 9px; backdrop-filter: blur(3px);
+    background: rgba(0,0,0,0.35); padding: 5px 10px; border-radius: 9px; backdrop-filter: blur(16px) saturate(1.5);
   }
   .readout .lbl { font-family: var(--font-body); font-weight: 500; font-size: 10.5px; color: var(--muted); }
 
   .gear-fab {
     position: absolute; top: max(64px, calc(env(safe-area-inset-top) + 50px)); right: 16px;
     width: 34px; height: 34px; border-radius: 50%;
-    background: rgba(0,0,0,0.35); backdrop-filter: blur(3px); border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(0,0,0,0.35); backdrop-filter: blur(16px) saturate(1.5); border: 1px solid rgba(255,255,255,0.12);
     color: var(--text); font-size: 15px; display: flex; align-items: center; justify-content: center;
   }
 
@@ -151,7 +167,7 @@
   .viewfinder-tools::-webkit-scrollbar { display: none; }
   .icon-btn-vf {
     width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
-    background: rgba(0,0,0,0.35); backdrop-filter: blur(3px); border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(0,0,0,0.35); backdrop-filter: blur(16px) saturate(1.5); border: 1px solid rgba(255,255,255,0.12);
     color: var(--text); font-size: 14px; display: flex; align-items: center; justify-content: center;
   }
   .icon-btn-vf.active { background: rgba(240,169,60,0.28); color: var(--accent); border-color: var(--accent); }
@@ -181,8 +197,15 @@
 
   .vf-shutter-row {
     position: absolute; left: 0; right: 0; bottom: max(64px, calc(env(safe-area-inset-bottom) + 56px));
-    display: flex; justify-content: center; z-index: 3;
+    display: flex; justify-content: center; align-items: center; z-index: 3;
   }
+  .gallery-thumb {
+    position: absolute; left: 32px; top: 50%; transform: translateY(-50%);
+    width: 42px; height: 42px; border-radius: 12px; border: 2px solid rgba(255,255,255,0.75);
+    background: var(--panel-2) center/cover no-repeat; box-shadow: var(--shadow-lift);
+    transition: transform 0.15s var(--ease);
+  }
+  .gallery-thumb:active { transform: translateY(-50%) scale(0.92); }
 
   .countdown-overlay {
     position: absolute; inset: 0; z-index: 5;
@@ -203,8 +226,8 @@
   .flash-flag.show { opacity: 1; transform: scale(1); }
 
   /* ---------- panels (usati in Intervallo, Alba, Statistiche, Connessione) ---------- */
-  .eyebrow { margin: 18px 20px 0; font-family: var(--font-display); font-size: 10.5px; font-weight: 600; letter-spacing: 0.09em; color: var(--muted-2); text-transform: uppercase; }
-  .panel { margin: 8px 20px 0; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 4px 16px; flex-shrink: 0; }
+  .eyebrow { margin: 20px 20px 8px; font-family: var(--font-display); font-size: 10.5px; font-weight: 700; letter-spacing: 0.11em; color: var(--muted); text-transform: uppercase; padding-left: 10px; border-left: 2px solid var(--line); }
+  .panel { margin: 8px 20px 0; background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--line); border-radius: 14px; padding: 4px 16px; flex-shrink: 0; box-shadow: var(--shadow-lift); }
   .ctrl { padding: 13px 0; display: flex; flex-direction: column; gap: 8px; }
   .ctrl + .ctrl { border-top: 1px solid var(--line); }
   .ctrl-head { display: flex; align-items: baseline; justify-content: space-between; }
@@ -231,7 +254,7 @@
   }
   input[type="text"]:focus { outline: none; border-color: var(--accent); }
 
-  .btn-ghost { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 500; font-family: var(--font-body); }
+  .btn-ghost { background: linear-gradient(180deg, var(--panel-3), var(--panel-2)); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 500; font-family: var(--font-body); box-shadow: var(--shadow-lift); }
   .btn-ghost:active { background: var(--line); }
 
   .hidden-panel { display: none !important; }
@@ -259,30 +282,32 @@
   .mode-pills { display: flex; gap: 8px; margin-bottom: 14px; overflow-x: auto; scrollbar-width: none; }
   .mode-pills::-webkit-scrollbar { display: none; }
   .mode-pill {
-    flex: 0 0 auto; min-width: 84px; text-align: center; padding: 8px 10px; border-radius: 20px;
-    border: 1px solid var(--line); background: rgba(23,24,29,0.55); backdrop-filter: blur(3px);
-    color: var(--muted); font-family: var(--font-display); font-weight: 600; font-size: 11px; letter-spacing: 0.02em;
-    white-space: nowrap;
+    flex: 0 0 auto; min-width: 84px; text-align: center; padding: 8px 14px; border-radius: 20px;
+    border: 1px solid var(--line-soft); background: var(--glass); backdrop-filter: blur(14px) saturate(1.4);
+    color: var(--muted); font-family: var(--font-display); font-weight: 600; font-size: 11px; letter-spacing: 0.03em;
+    white-space: nowrap; display: flex; align-items: center; justify-content: center; gap: 6px;
   }
-  .mode-pill.active { color: var(--text); border-color: rgba(255,255,255,0.18); background: rgba(46,48,58,0.75); }
-  .mode-pill.active[data-screen="flash"] { color: var(--live); }
-  .mode-pill.active[data-screen="interval"] { color: var(--trace); }
-  .mode-pill.active[data-screen="sun"] { color: var(--accent); }
-  .mode-pill.active[data-screen="motion"] { color: var(--wild); }
-  .mode-pill.active[data-screen="beam"] { color: var(--beam); }
+  .mode-pill::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--muted-2); flex-shrink: 0; transition: background 0.2s var(--ease); }
+  .mode-pill.active { color: var(--text); border-color: rgba(255,255,255,0.14); background: rgba(255,255,255,0.06); }
+  .mode-pill.active[data-screen="flash"]::before { background: var(--live); }
+  .mode-pill.active[data-screen="interval"]::before { background: var(--trace); }
+  .mode-pill.active[data-screen="sun"]::before { background: var(--accent); }
+  .mode-pill.active[data-screen="motion"]::before { background: var(--wild); }
+  .mode-pill.active[data-screen="beam"]::before { background: var(--beam); }
 
   .shutter-row { display: flex; align-items: center; justify-content: center; position: relative; height: 76px; }
   .shutter-btn {
-    width: 70px; height: 70px; border-radius: 50%; border: 4px solid rgba(255,255,255,0.14);
-    background: var(--accent); color: #1A1200;
-    font-family: var(--font-display); font-weight: 700; font-size: 10.5px; letter-spacing: 0.02em;
+    width: 68px; height: 68px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.85);
+    background: #F4F4F2; color: #17181D;
+    font-family: var(--font-display); font-weight: 700; font-size: 10px; letter-spacing: 0.03em;
     display: flex; align-items: center; justify-content: center;
-    transition: background 0.15s, color 0.15s, transform 0.08s;
+    box-shadow: 0 3px 14px rgba(0,0,0,0.3), var(--shadow-lift);
+    transition: background 0.2s var(--ease), color 0.2s var(--ease), transform 0.1s var(--ease), box-shadow 0.2s var(--ease), border-color 0.2s var(--ease);
   }
-  .shutter-btn.armed { background: var(--live); color: #2A0803; animation: pulse 1.6s ease-in-out infinite; }
+  .shutter-btn.armed { background: var(--live); color: #fff; border-color: rgba(255,255,255,0.9); box-shadow: 0 3px 14px rgba(224,102,79,0.4), var(--shadow-lift); animation: pulse 1.8s ease-in-out infinite; }
   @keyframes pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(255,91,69,0.4); }
-    50% { box-shadow: 0 0 0 10px rgba(255,91,69,0); }
+    0%, 100% { box-shadow: 0 3px 14px rgba(224,102,79,0.4), var(--shadow-lift), 0 0 0 0 rgba(224,102,79,0.35); }
+    50% { box-shadow: 0 3px 14px rgba(224,102,79,0.4), var(--shadow-lift), 0 0 0 10px rgba(224,102,79,0); }
   }
   .shutter-btn:active { transform: scale(0.95); }
 
@@ -334,12 +359,13 @@
   .sheet-overlay.open { opacity: 1; pointer-events: auto; }
   .sheet {
     position: fixed; left: 0; right: 0; bottom: 0; max-height: 80vh; overflow-y: auto;
-    background: var(--panel); border-top: 1px solid var(--line); border-radius: 20px 20px 0 0;
-    transform: translateY(100%); transition: transform 0.22s ease; z-index: 31;
+    background: linear-gradient(180deg, var(--panel-2), var(--panel) 40%); border-top: 1px solid var(--line); border-radius: 20px 20px 0 0;
+    box-shadow: 0 -12px 32px rgba(0,0,0,0.45);
+    transform: translateY(100%); transition: transform 0.32s var(--ease); z-index: 31;
     padding: 12px 0 max(20px, env(safe-area-inset-bottom));
   }
   .sheet.open { transform: translateY(0); }
-  .sheet-handle { width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto 14px; }
+  .sheet-handle { width: 36px; height: 4px; border-radius: 2px; background: var(--line-soft); margin: 0 auto 14px; }
   .sheet-title { font-family: var(--font-display); font-weight: 700; font-size: 16px; padding: 0 20px 4px; }
   /* ---------- adattamento orizzontale ---------- */
   @media (orientation: landscape) {
@@ -371,7 +397,7 @@
 <nav class="drawer" id="drawer">
   <div class="drawer-brand">
     <span>TRIGGER<span class="dim"> / A6100</span></span>
-    <button class="drawer-close" id="drawerCloseBtn">✕</button>
+    <button class="drawer-close" id="drawerCloseBtn"><svg class="icon" viewBox="0 0 24 24" style="width:15px;height:15px;"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
   </div>
 
   <div class="drawer-section">Principale</div>
@@ -740,7 +766,7 @@
 </div>
 
 <header class="overlay-header" id="mainHeader">
-  <button class="icon-btn" id="menuBtn">☰</button>
+  <button class="icon-btn" id="menuBtn"><svg class="icon" viewBox="0 0 24 24" style="width:19px;height:19px;"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
   <div class="header-title"><span class="tab-dot" id="headerDot" style="background:var(--accent);"></span><span id="headerTitle">Fotocamera</span></div>
   <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">OFFLINE</span></div>
 </header>
@@ -768,17 +794,18 @@
       <div class="readout"><span class="lbl">Luce</span><span id="meterBrightness">—</span><span class="lbl" style="margin-left:8px;">posa</span><span id="meterShutterOverlay">—</span></div>
 
       <div class="viewfinder-tools">
-        <button class="icon-btn-vf" id="gridToggleBtn">▦</button>
-        <button class="icon-btn-vf" id="levelToggleBtn">◐</button>
-        <button class="icon-btn-vf" id="zebraToggleBtn">▤</button>
-        <button class="icon-btn-vf" id="peakingToggleBtn">◈</button>
-        <button class="icon-btn-vf" id="waveformToggleBtn">∿</button>
-        <button class="icon-btn-vf" id="falseColorToggleBtn">🎨</button>
-        <button class="icon-btn-vf" id="liveViewToggleBtn">📷</button>
-        <button class="icon-btn-vf" id="cameraGearBtn">⚙</button>
+        <button class="icon-btn-vf" id="gridToggleBtn"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg></button>
+        <button class="icon-btn-vf" id="levelToggleBtn"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/><path d="M3 12h4M17 12h4"/></svg></button>
+        <button class="icon-btn-vf" id="zebraToggleBtn"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9l6-6M3 16l13-13M3 21l18-18M10 21l11-11M17 21l4-4"/></svg></button>
+        <button class="icon-btn-vf" id="peakingToggleBtn"><svg class="icon" viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M18 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M6 20H4a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3.4"/></svg></button>
+        <button class="icon-btn-vf" id="waveformToggleBtn"><svg class="icon" viewBox="0 0 24 24"><path d="M2 12c1.5-6 3.5-6 5 0s3.5 6 5 0 3.5-6 5-6 3.5 0 5 6"/></svg></button>
+        <button class="icon-btn-vf" id="falseColorToggleBtn"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 3.5 17.3c.9-.4 1-1.6.3-2.3-.5-.5-.7-1-.4-1.7.3-.7 1-1 1.8-1h1.3c2 0 3.5-1.6 3.5-3.6C22 6.6 17.9 3 12 3Z"/><circle cx="7.3" cy="10.8" r="1.3" fill="currentColor" stroke="none"/><circle cx="10.3" cy="7.2" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="7.6" r="1.3" fill="currentColor" stroke="none"/></svg></button>
+        <button class="icon-btn-vf" id="liveViewToggleBtn"><svg class="icon" viewBox="0 0 24 24"><rect x="2.5" y="7" width="19" height="13" rx="2.4"/><path d="M8 7l1.4-2.6a1 1 0 0 1 .9-.5h3.4a1 1 0 0 1 .9.5L16 7"/><circle cx="12" cy="13.6" r="3.6"/></svg></button>
+        <button class="icon-btn-vf" id="cameraGearBtn"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M5.1 5.1l2.1 2.1M16.8 16.8l2.1 2.1M2.5 12h3M18.5 12h3M5.1 18.9l2.1-2.1M16.8 7.2l2.1-2.1"/></svg></button>
       </div>
 
       <div class="vf-shutter-row">
+        <button class="gallery-thumb hidden-panel" id="galleryThumbBtn" aria-label="Ultimo scatto"></button>
         <button class="shutter-btn" id="cameraShootBtn">SCATTA</button>
       </div>
 
@@ -791,7 +818,7 @@
       <video id="video" autoplay muted playsinline></video>
       <canvas id="analyzeCanvas" class="hidden"></canvas>
       <div class="readout"><span class="lbl">Δ</span><span id="luxValue">0.0</span><span class="lbl" style="margin-left:8px;">unif</span><span id="uniformityValue">—</span></div>
-      <button class="gear-fab" id="gearBtn">⚙</button>
+      <button class="gear-fab" id="gearBtn"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M5.1 5.1l2.1 2.1M16.8 16.8l2.1 2.1M2.5 12h3M18.5 12h3M5.1 18.9l2.1-2.1M16.8 7.2l2.1-2.1"/></svg></button>
       <div class="flash-flag" id="flashFlag">LAMPO</div>
       <div class="trace-shade"></div>
       <canvas id="traceCanvas" class="trace-canvas"></canvas>
@@ -802,7 +829,7 @@
     <div class="viewfinder">
       <video id="videoMotion" autoplay muted playsinline></video>
       <div class="readout"><span class="lbl">movim.</span><span id="motionValue">0.0</span></div>
-      <button class="gear-fab" id="motionGearBtn">⚙</button>
+      <button class="gear-fab" id="motionGearBtn"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M5.1 5.1l2.1 2.1M16.8 16.8l2.1 2.1M2.5 12h3M18.5 12h3M5.1 18.9l2.1-2.1M16.8 7.2l2.1-2.1"/></svg></button>
       <div class="flash-flag" id="motionFlag" style="background:rgba(139,195,74,0.2); color:var(--wild); border-color:rgba(139,195,74,0.4);">MOVIMENTO</div>
       <div class="trace-shade"></div>
       <canvas id="motionTraceCanvas" class="trace-canvas"></canvas>
@@ -813,7 +840,7 @@
     <div class="viewfinder">
       <video id="videoBeam" autoplay muted playsinline></video>
       <div class="readout"><span class="lbl">calo</span><span id="beamValue">0.0</span></div>
-      <button class="gear-fab" id="beamGearBtn">⚙</button>
+      <button class="gear-fab" id="beamGearBtn"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M5.1 5.1l2.1 2.1M16.8 16.8l2.1 2.1M2.5 12h3M18.5 12h3M5.1 18.9l2.1-2.1M16.8 7.2l2.1-2.1"/></svg></button>
       <div class="flash-flag" id="beamFlag" style="background:rgba(255,61,143,0.2); color:var(--beam); border-color:rgba(255,61,143,0.4);">INTERROTTO</div>
       <div class="trace-shade"></div>
       <canvas id="beamTraceCanvas" class="trace-canvas"></canvas>
@@ -1707,6 +1734,11 @@ function handleCapturedFile(file) {
     URL.revokeObjectURL(removed.url);
   }
   renderGallery();
+  const thumbBtn = document.getElementById('galleryThumbBtn');
+  if (thumbBtn) {
+    thumbBtn.style.backgroundImage = `url("${url}")`;
+    thumbBtn.classList.remove('hidden-panel');
+  }
   if (autoSaveOn) downloadFile(url, name);
 }
 
@@ -1941,6 +1973,7 @@ const cameraGearBtn = document.getElementById('cameraGearBtn');
 function openCameraSheet() { cameraSheet.classList.add('open'); cameraSheetOverlay.classList.add('open'); }
 function closeCameraSheet() { cameraSheet.classList.remove('open'); cameraSheetOverlay.classList.remove('open'); }
 cameraGearBtn.onclick = openCameraSheet;
+document.getElementById('galleryThumbBtn').onclick = openCameraSheet;
 cameraSheetOverlay.onclick = closeCameraSheet;
 
 const motionSheet = document.getElementById('motionSheet');
