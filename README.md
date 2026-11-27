@@ -53,6 +53,29 @@ USO
    soglia/raffica/filtro scena dall'icona ⚙, premi ARMA.
 
 --------------------------------------------------------------------
+NOVITÀ — MOTORE DI RILEVAMENTO v2
+--------------------------------------------------------------------
+- Analisi di OGNI fotogramma della fotocamera del telefono (prima 15
+  al secondo): i lampi brevissimi, lunghi un solo fotogramma, non
+  sfuggono più.
+- Lampi parziali: oltre alla media dell'inquadratura controlla 12 zone
+  e 12 bande orizzontali (il fulmine "a striscia" del rolling shutter).
+  Disattivabile da ⚙ → "Rileva lampi parziali".
+- La linea di base si congela durante un evento: il lampo non sporca
+  più il riferimento per i fotogrammi successivi.
+- Calibrazione guidata (⚙ → Calibra) per Flash, Raggio e Animali:
+  3 s di misura del rumore, poi un evento di prova facoltativo; la
+  soglia viene impostata da sola e mostra il margine sul rumore.
+- Soglia automatica: segue il rumore della scena (media + N σ).
+- Blocco esposizione del telefono (dove il browser lo permette), per
+  evitare che le correzioni automatiche sembrino lampi o cali.
+- Schermo sempre acceso mentre qualcosa è armato.
+- Mirino: soglia effettiva, rumore e fps in tempo reale; grafico con
+  scala automatica, picco trattenuto e banda del rumore.
+- Coda dei comandi USB senza attese a vuoto, registro di debug non più
+  intasato a ogni fotogramma.
+
+--------------------------------------------------------------------
 DIFFERENZE RISPETTO ALLA VERSIONE PI5
 --------------------------------------------------------------------
 - Statistiche, intervallo e alba/tramonto sono calcolati e salvati

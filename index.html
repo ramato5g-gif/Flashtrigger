@@ -272,6 +272,9 @@
   .switch[aria-checked="true"] .switch-knob { transform: translateX(19px); }
   .switch:active .switch-knob { width: 24px; }
   .btn-ghost:active { background: var(--line); }
+  .calib-status { font-size: 12.5px; color: var(--muted); line-height: 1.45; padding: 0 0 12px; }
+  .calib-status.ok { color: var(--trace); }
+  .calib-status.warn { color: var(--accent); }
 
   .hidden-panel { display: none !important; }
 
@@ -487,7 +490,7 @@
   <div class="panel">
     <div class="ctrl">
       <div class="ctrl-head"><span class="name">Sensibilità movimento</span><span class="num" id="motionThresholdVal">35</span></div>
-      <input type="range" id="motionThreshold" min="5" max="90" value="35">
+      <input type="range" id="motionThreshold" min="0.5" max="90" value="35" step="0.1">
     </div>
     <div class="ctrl">
       <div class="ctrl-head"><span class="name">Ritardo scatto</span><span class="num" id="motionDelayVal">0 ms</span></div>
@@ -1276,15 +1279,13 @@ let cameraConnected = false;
  * mentre arriva un comando di scatto) possono mandarla in blocco. Questo
  * blocco garantisce che un solo comando alla volta raggiunga la fotocamera,
  * qualunque sia il punto dell'app che lo genera. */
-let cameraBusy = false;
-async function withCameraLock(fn) {
-  while (cameraBusy) await new Promise(r => setTimeout(r, 20));
-  cameraBusy = true;
-  try {
-    return await fn();
-  } finally {
-    cameraBusy = false;
-  }
+// Coda a promesse invece del controllo ogni 20 ms: il comando successivo
+// parte nell'istante esatto in cui finisce il precedente, senza attese a vuoto.
+let cameraQueue = Promise.resolve();
+function withCameraLock(fn) {
+  const run = cameraQueue.then(() => fn());
+  cameraQueue = run.catch(() => {});
+  return run;
 }
 
 async function loadCameraLib() {
@@ -2967,8 +2968,8 @@ const phoneCameraSelect = document.getElementById('phoneCameraSelect');
 async function startCamPreview(deviceId) {
   try {
     const videoConstraints = deviceId
-      ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
-      : { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } };
+      ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } }
+      : { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } };
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
@@ -2977,7 +2978,7 @@ async function startCamPreview(deviceId) {
       log('error', 'Sensore salvato non disponibile, torno a quello predefinito');
       localStorage.removeItem('ft_phone_camera_id');
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false
+        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } }, audio: false
       });
     }
 
@@ -3005,7 +3006,9 @@ async function startCamPreview(deviceId) {
     resizeTrace();
     resizeMotionTrace();
     resizeBeamTrace();
-    requestAnimationFrame(analyzeLoop);
+    resetDetectionState();
+    startFrameLoop(stream.getVideoTracks()[0]);
+    if (exposureLockOn) setExposureLock(true, true);
     await populatePhoneCameraList();
   } catch (e) {
     log('error', 'Fotocamera del telefono non disponibile: ' + e.message);
@@ -3036,203 +3039,321 @@ phoneCameraSelect.onchange = () => {
   startCamPreview(id || undefined);
 };
 
-function drawTrace() {
-  const w = traceCanvas.width, h = traceCanvas.height;
-  if (!w || !h) return;
-  tctx.clearRect(0, 0, w, h);
-  const threshold = parseFloat(thresholdEl.value);
-  const scaleMax = 60;
-  const thY = h - (threshold / scaleMax) * h;
-  tctx.strokeStyle = 'rgba(240,169,60,0.45)';
-  tctx.setLineDash([4 * devicePixelRatio, 4 * devicePixelRatio]);
-  tctx.lineWidth = 1 * devicePixelRatio;
-  tctx.beginPath(); tctx.moveTo(0, thY); tctx.lineTo(w, thY); tctx.stroke();
-  tctx.setLineDash([]);
+// ====================================================================
+// MOTORE DI RILEVAMENTO v2 — fluidità, precisione, calibrazione
+// --------------------------------------------------------------------
+// - Analizza OGNI fotogramma della fotocamera (MediaStreamTrackProcessor
+//   dove disponibile), non più 15 al secondo: un lampo che dura un solo
+//   fotogramma non sfugge più.
+// - Tutte le costanti di tempo sono in millisecondi, non in fotogrammi:
+//   il comportamento è identico a 15, 30 o 60 fps.
+// - La linea di base si "congela" durante un evento, così il lampo non
+//   contamina il riferimento (prima il 5% del lampo entrava subito nella
+//   media e alzava la soglia per i fotogrammi successivi).
+// - Rumore misurato di continuo (media e deviazione standard) per la
+//   soglia automatica e per la calibrazione guidata.
+// - Lampi parziali: oltre alla media dell'intera inquadratura controlla
+//   12 zone e 12 bande orizzontali (le bande catturano il lampo "a
+//   striscia" tipico del rolling shutter del telefono).
+// ====================================================================
+const BAND_COUNT = 12;
+const bandSumsBuf = new Float32Array(BAND_COUNT);
+const bandCountsBuf = new Uint32Array(BAND_COUNT);
+let bandBaseline = new Array(BAND_COUNT).fill(null);
+const zoneNowBuf = new Float32Array(ZONE_COUNT);
+const BASELINE_TAU_MS = 1300;   // equivalente a 0.05 per fotogramma a 15 fps
+const ZONE_TAU_MS = 800;        // equivalente a 0.08 per fotogramma a 15 fps
+const RELEARN_TAU_MS = 400;     // se un "evento" dura troppo è un cambio di scena: si riadatta in fretta
+const EVENT_RELEARN_MS = 1500;
+const NOISE_TAU_MS = 3000;
+const MOTION_STEP_MS = 66;      // il movimento si confronta sempre con ~66 ms prima, come in origine
+const TRACE_STEP_MS = 66;       // il grafico resta di ~6 s, con picco trattenuto per ogni passo
+const READOUT_STEP_MS = 100;
 
-  if (traceBuffer.length < 2) return;
-  const stepX = w / (TRACE_LEN - 1);
-  tctx.strokeStyle = '#57D6C4';
-  tctx.lineWidth = 1.6 * devicePixelRatio;
-  tctx.beginPath();
-  traceBuffer.forEach((v, i) => {
-    const x = i * stepX;
-    const y = h - Math.min(1, v / scaleMax) * h;
-    i === 0 ? tctx.moveTo(x, y) : tctx.lineTo(x, y);
-  });
-  tctx.stroke();
+function makeDet(el, key, defK) {
+  return {
+    el, key,
+    autoOn: localStorage.getItem('ft_auto_' + key) === '1',
+    autoK: parseFloat(localStorage.getItem('ft_autok_' + key)) || defK,
+    noiseM: 0, noiseV: 0, noiseN: 0,
+    calibrating: null, scale: 10, tracePeak: 0, last: 0
+  };
+}
+const det = {
+  flash: makeDet(thresholdEl, 'flash', 6),
+  beam: makeDet(beamThresholdEl, 'beam', 6),
+  motion: makeDet(motionThresholdEl, 'motion', 5),
+};
+det.flash.partialOn = localStorage.getItem('ft_partial') !== '0';
+
+let detEventSince = null;
+let lastFrameT = null;
+let lastMotionStepT = 0;
+let lastTraceStepT = 0;
+let lastReadoutT = 0;
+let fpsFrames = 0, fpsT0 = performance.now(), analyzeFps = 0;
+
+function emaAlpha(dt, tau) { return 1 - Math.exp(-dt / tau); }
+
+function effThreshold(kind) {
+  const d = det[kind];
+  const manual = parseFloat(d.el.value);
+  if (!d.autoOn || d.noiseN < 20) return manual;
+  return Math.max(0.3, d.noiseM + d.autoK * Math.sqrt(d.noiseV));
 }
 
-function drawMotionTrace() {
-  const w = motionTraceCanvas.width, h = motionTraceCanvas.height;
-  if (!w || !h) return;
-  motionTctx.clearRect(0, 0, w, h);
-  const threshold = parseFloat(motionThresholdEl.value);
-  const scaleMax = 60;
-  const thY = h - (threshold / scaleMax) * h;
-  motionTctx.strokeStyle = 'rgba(139,195,74,0.45)';
-  motionTctx.setLineDash([4 * devicePixelRatio, 4 * devicePixelRatio]);
-  motionTctx.lineWidth = 1 * devicePixelRatio;
-  motionTctx.beginPath(); motionTctx.moveTo(0, thY); motionTctx.lineTo(w, thY); motionTctx.stroke();
-  motionTctx.setLineDash([]);
-
-  if (motionTraceBuffer.length < 2) return;
-  const stepX = w / (TRACE_LEN - 1);
-  motionTctx.strokeStyle = '#8BC34A';
-  motionTctx.lineWidth = 1.6 * devicePixelRatio;
-  motionTctx.beginPath();
-  motionTraceBuffer.forEach((v, i) => {
-    const x = i * stepX;
-    const y = h - Math.min(1, v / scaleMax) * h;
-    i === 0 ? motionTctx.moveTo(x, y) : motionTctx.lineTo(x, y);
-  });
-  motionTctx.stroke();
+function updateNoise(d, x, dt) {
+  const a = d.noiseN < 30 ? 1 / (d.noiseN + 1) : emaAlpha(dt, NOISE_TAU_MS);
+  const diff = x - d.noiseM;
+  d.noiseM += a * diff;
+  d.noiseV = (1 - a) * (d.noiseV + a * diff * diff);
+  d.noiseN++;
 }
 
-function drawBeamTrace() {
-  const w = beamTraceCanvas.width, h = beamTraceCanvas.height;
-  if (!w || !h) return;
-  beamTctx.clearRect(0, 0, w, h);
-  const threshold = parseFloat(beamThresholdEl.value);
-  const scaleMax = 60;
-  const thY = h - (threshold / scaleMax) * h;
-  beamTctx.strokeStyle = 'rgba(255,61,143,0.45)';
-  beamTctx.setLineDash([4 * devicePixelRatio, 4 * devicePixelRatio]);
-  beamTctx.lineWidth = 1 * devicePixelRatio;
-  beamTctx.beginPath(); beamTctx.moveTo(0, thY); beamTctx.lineTo(w, thY); beamTctx.stroke();
-  beamTctx.setLineDash([]);
-
-  if (beamTraceBuffer.length < 2) return;
-  const stepX = w / (TRACE_LEN - 1);
-  beamTctx.strokeStyle = '#FF3D8F';
-  beamTctx.lineWidth = 1.6 * devicePixelRatio;
-  beamTctx.beginPath();
-  beamTraceBuffer.forEach((v, i) => {
-    const x = i * stepX;
-    const y = h - Math.min(1, v / scaleMax) * h;
-    i === 0 ? beamTctx.moveTo(x, y) : beamTctx.lineTo(x, y);
-  });
-  beamTctx.stroke();
+function resetDetectionState() {
+  baseline = null;
+  zoneBaseline.fill(null);
+  bandBaseline.fill(null);
+  prevFrameLum = null;
+  prevDelta = 0;
+  detEventSince = null;
+  lastFrameT = null;
+  Object.values(det).forEach(d => { d.noiseM = 0; d.noiseV = 0; d.noiseN = 0; });
 }
 
-let lastAnalyzeTime = 0;
-const ANALYZE_INTERVAL_MS = 66; // ~15 fotogrammi al secondo: più che sufficiente per luce/movimento, molto più leggero di 60fps
+const logThrottleMap = {};
+function logThrottled(key, kind, text, ms = 1500) {
+  const t = performance.now();
+  if (logThrottleMap[key] && t - logThrottleMap[key] < ms) return;
+  logThrottleMap[key] = t;
+  log(kind, text);
+}
 
-function analyzeLoop(timestamp) {
-  if (timestamp - lastAnalyzeTime < ANALYZE_INTERVAL_MS) {
-    requestAnimationFrame(analyzeLoop);
-    return;
+const screenEls = {};
+function screenActive(name) {
+  if (!screenEls[name]) screenEls[name] = document.getElementById('screen-' + name);
+  return screenEls[name] && screenEls[name].classList.contains('active');
+}
+
+function fmtN(v) { return v >= 10 ? v.toFixed(1) : v >= 1 ? v.toFixed(2) : v.toFixed(3); }
+
+// ---------- grafici (scala automatica + banda del rumore) ----------
+function drawTraceGeneric(ctx, canvas, buf, d, th, lineColor, thColor) {
+  const w = canvas.width, h = canvas.height;
+  if (!w || !h) return;
+  ctx.clearRect(0, 0, w, h);
+  let bmax = 0;
+  for (let i = 0; i < buf.length; i++) if (buf[i] > bmax) bmax = buf[i];
+  const target = Math.max(th * 1.6, bmax * 1.15, 1);
+  d.scale = target > d.scale ? target : d.scale * 0.97 + target * 0.03;
+  const sc = d.scale;
+  const yOf = v => h - Math.min(1, v / sc) * h;
+
+  if (d.noiseN >= 20) {
+    const nTop = yOf(d.noiseM + 3 * Math.sqrt(d.noiseV));
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    ctx.fillRect(0, nTop, w, h - nTop);
   }
-  lastAnalyzeTime = timestamp;
+  const thY = yOf(th);
+  ctx.strokeStyle = thColor;
+  ctx.setLineDash([4 * devicePixelRatio, 4 * devicePixelRatio]);
+  ctx.lineWidth = 1 * devicePixelRatio;
+  ctx.beginPath(); ctx.moveTo(0, thY); ctx.lineTo(w, thY); ctx.stroke();
+  ctx.setLineDash([]);
 
-  try {
-    analyzeFrame();
-  } catch (e) {
-    analyzeErrorCount++;
-    if (analyzeErrorCount <= 3 || analyzeErrorCount % 50 === 0) {
-      log('error', `Ciclo di analisi: errore su un fotogramma (${e.message}) — continuo comunque, non dovrebbe bloccare il rilevamento`);
-    }
+  if (buf.length < 2) return;
+  const stepX = w / (TRACE_LEN - 1);
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 1.6 * devicePixelRatio;
+  ctx.beginPath();
+  for (let i = 0; i < buf.length; i++) {
+    const x = i * stepX, y = yOf(buf[i]);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
   }
-  requestAnimationFrame(analyzeLoop);
+  ctx.stroke();
 }
+function drawTrace() { drawTraceGeneric(tctx, traceCanvas, traceBuffer, det.flash, effThreshold('flash'), '#57D6C4', 'rgba(240,169,60,0.55)'); }
+function drawMotionTrace() { drawTraceGeneric(motionTctx, motionTraceCanvas, motionTraceBuffer, det.motion, effThreshold('motion'), '#8BC34A', 'rgba(139,195,74,0.55)'); }
+function drawBeamTrace() { drawTraceGeneric(beamTctx, beamTraceCanvas, beamTraceBuffer, det.beam, effThreshold('beam'), '#FF3D8F', 'rgba(255,61,143,0.55)'); }
+
+// ---------- ciclo fotogrammi ----------
+let frameLoopToken = 0;
+let frameReader = null;
+let frameSource = '—';
 let analyzeErrorCount = 0;
 
-function analyzeFrame() {
-  if (video.readyState >= 2) {
-    actx.drawImage(video, 0, 0, analyzeCanvas.width, analyzeCanvas.height);
-    const frame = actx.getImageData(0, 0, analyzeCanvas.width, analyzeCanvas.height).data;
-    const w = analyzeCanvas.width, h = analyzeCanvas.height;
-    const zoneW = w / GRID_COLS, zoneH = h / GRID_ROWS;
-    const zoneSums = zoneSumsBuf.fill(0);
-    const zoneCounts = zoneCountsBuf.fill(0);
-    const histCounts = histCountsBuf.fill(0);
-    const histRCounts = histRCountsBuf.fill(0);
-    const histGCounts = histGCountsBuf.fill(0);
-    const histBCounts = histBCountsBuf.fill(0);
-    const vectorBuckets = vectorBucketsBuf.fill(0);
-    const motionSums = motionSumsBuf.fill(0);
-    const motionCounts = motionCountsBuf.fill(0);
-    const motionCellW = w / MOTION_COLS, motionCellH = h / MOTION_ROWS;
-    let sum = 0, count = 0;
-    const step = 8; // campiona il doppio dei pixel di prima: meno rumore, più sensibilità ai cali/aumenti reali
+function stopFrameLoop() {
+  frameLoopToken++;
+  if (frameReader) { frameReader.cancel().catch(() => {}); frameReader = null; }
+}
 
-    for (let i = 0; i < frame.length; i += step) {
-      const pixelIndex = i / 4;
-      const x = pixelIndex % w;
-      const y = Math.floor(pixelIndex / w);
+function startFrameLoop(track) {
+  stopFrameLoop();
+  const token = frameLoopToken;
+  if (track && 'MediaStreamTrackProcessor' in window) {
+    try {
+      const proc = new MediaStreamTrackProcessor({ track });
+      const reader = proc.readable.getReader();
+      frameReader = reader;
+      frameSource = 'fotogramma per fotogramma';
+      (async () => {
+        while (token === frameLoopToken) {
+          let res;
+          try { res = await reader.read(); } catch (e) { break; }
+          if (res.done) break;
+          const frame = res.value;
+          try { runAnalysis(frame); } finally { frame.close(); }
+        }
+      })();
+      log('ok', 'Analisi su ogni fotogramma della fotocamera attiva');
+      return;
+    } catch (e) {
+      log('error', 'Analisi per fotogramma non disponibile (' + e.message + '), uso il ciclo standard');
+    }
+  }
+  // Ricaduta: ciclo di disegno senza limite artificiale, analizza solo
+  // quando il video ha davvero un fotogramma nuovo.
+  frameSource = 'ciclo standard';
+  let lastT = -1;
+  const loop = () => {
+    if (token !== frameLoopToken) return;
+    if (video.readyState >= 2 && video.currentTime !== lastT) {
+      lastT = video.currentTime;
+      runAnalysis(video);
+    }
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+
+function runAnalysis(source) {
+  try {
+    analyzeFrame(source);
+  } catch (e) {
+    analyzeErrorCount++;
+    if (analyzeErrorCount <= 3 || analyzeErrorCount % 200 === 0) {
+      log('error', `Ciclo di analisi: errore su un fotogramma (${e.message}) — continuo comunque`);
+    }
+  }
+}
+
+function analyzeFrame(source) {
+  const now = performance.now();
+  const dt = lastFrameT === null ? 33 : Math.min(250, Math.max(1, now - lastFrameT));
+  lastFrameT = now;
+
+  fpsFrames++;
+  if (now - fpsT0 >= 1000) { analyzeFps = fpsFrames * 1000 / (now - fpsT0); fpsFrames = 0; fpsT0 = now; }
+
+  const w = analyzeCanvas.width, h = analyzeCanvas.height;
+  actx.drawImage(source, 0, 0, w, h);
+  const frame = actx.getImageData(0, 0, w, h).data;
+  const cameraScreenOn = screenActive('camera');
+
+  const zoneW = w / GRID_COLS, zoneH = h / GRID_ROWS;
+  const zoneSums = zoneSumsBuf.fill(0), zoneCounts = zoneCountsBuf.fill(0);
+  const bandSums = bandSumsBuf.fill(0), bandCounts = bandCountsBuf.fill(0);
+  const motionSums = motionSumsBuf.fill(0), motionCounts = motionCountsBuf.fill(0);
+  const histCounts = cameraScreenOn ? histCountsBuf.fill(0) : histCountsBuf;
+  const histRCounts = cameraScreenOn ? histRCountsBuf.fill(0) : histRCountsBuf;
+  const histGCounts = cameraScreenOn ? histGCountsBuf.fill(0) : histGCountsBuf;
+  const histBCounts = cameraScreenOn ? histBCountsBuf.fill(0) : histBCountsBuf;
+  const vectorBuckets = cameraScreenOn ? vectorBucketsBuf.fill(0) : vectorBucketsBuf;
+  const motionCellW = w / MOTION_COLS, motionCellH = h / MOTION_ROWS;
+  let sum = 0, count = 0;
+
+  // Campionamento a scacchiera: metà dei pixel come prima, ma distribuiti
+  // uniformemente (prima si leggevano sempre le stesse colonne).
+  for (let y = 0; y < h; y++) {
+    const zRow = Math.min(GRID_ROWS - 1, (y / zoneH) | 0) * GRID_COLS;
+    const mRow = Math.min(MOTION_ROWS - 1, (y / motionCellH) | 0) * MOTION_COLS;
+    const band = Math.min(BAND_COUNT - 1, (y * BAND_COUNT / h) | 0);
+    const rowBase = y * w * 4;
+    for (let x = y & 1; x < w; x += 2) {
+      const i = rowBase + x * 4;
       const r = frame[i], g = frame[i + 1], b = frame[i + 2];
       const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
       sum += lum; count++;
-      const zx = Math.min(GRID_COLS - 1, Math.floor(x / zoneW));
-      const zy = Math.min(GRID_ROWS - 1, Math.floor(y / zoneH));
-      const zi = zy * GRID_COLS + zx;
+      const zi = zRow + Math.min(GRID_COLS - 1, (x / zoneW) | 0);
       zoneSums[zi] += lum; zoneCounts[zi]++;
-      histCounts[Math.min(HIST_BINS - 1, Math.floor(lum / 256 * HIST_BINS))]++;
-      histRCounts[Math.min(HIST_BINS - 1, Math.floor(r / 256 * HIST_BINS))]++;
-      histGCounts[Math.min(HIST_BINS - 1, Math.floor(g / 256 * HIST_BINS))]++;
-      histBCounts[Math.min(HIST_BINS - 1, Math.floor(b / 256 * HIST_BINS))]++;
-      // vettoroscopio: componenti di crominanza Cb/Cr, posizionate su una griglia circolare
-      const cb = (b - lum) * 0.564, cr = (r - lum) * 0.713;
-      const vx = Math.min(VECTOR_SIZE - 1, Math.max(0, Math.round(VECTOR_SIZE / 2 + cb / 128 * (VECTOR_SIZE / 2))));
-      const vy = Math.min(VECTOR_SIZE - 1, Math.max(0, Math.round(VECTOR_SIZE / 2 - cr / 128 * (VECTOR_SIZE / 2))));
-      vectorBuckets[vy * VECTOR_SIZE + vx]++;
-      const mx = Math.min(MOTION_COLS - 1, Math.floor(x / motionCellW));
-      const my = Math.min(MOTION_ROWS - 1, Math.floor(y / motionCellH));
-      const mi = my * MOTION_COLS + mx;
+      bandSums[band] += lum; bandCounts[band]++;
+      const mi = mRow + Math.min(MOTION_COLS - 1, (x / motionCellW) | 0);
       motionSums[mi] += lum; motionCounts[mi]++;
-    }
-
-    const avg = sum / count / 255 * 100;
-    if (baseline === null) baseline = avg; else baseline = baseline * 0.95 + avg * 0.05;
-    currentBrightness = avg;
-    const delta = Math.max(0, avg - baseline);
-    luxValue.textContent = delta.toFixed(1);
-
-    let activeZones = 0;
-    for (let zi = 0; zi < ZONE_COUNT; zi++) {
-      const zAvg = zoneCounts[zi] ? (zoneSums[zi] / zoneCounts[zi] / 255 * 100) : avg;
-      if (zoneBaseline[zi] === null) zoneBaseline[zi] = zAvg;
-      else zoneBaseline[zi] = zoneBaseline[zi] * 0.92 + zAvg * 0.08;
-      const zDelta = Math.max(0, zAvg - zoneBaseline[zi]);
-      if (zDelta >= delta * 0.5) activeZones++;
-    }
-    const uniformity = activeZones / ZONE_COUNT;
-    if (mode === 'flash') uniformityValue.textContent = delta > 1 ? Math.round(uniformity * 100) + '%' : '—';
-
-    if (document.getElementById('screen-camera').classList.contains('active')) {
-      drawHistogram(histCounts);
-      drawHistogramRGB(histRCounts, histGCounts, histBCounts);
-      drawVectorscope(vectorBuckets);
-    }
-
-    traceBuffer.push(delta);
-    if (traceBuffer.length > TRACE_LEN) traceBuffer.shift();
-    if (document.getElementById('screen-flash').classList.contains('active')) drawTrace();
-
-    const threshold = parseFloat(thresholdEl.value);
-    const now = performance.now();
-    const cooldown = parseFloat(cooldownEl.value);
-    const suddenRise = prevDelta < threshold * 0.3;
-
-    const passesBasic = delta >= threshold;
-    const passesScene = !sceneFilterOn || (uniformity >= (parseFloat(uniformityMinEl.value) / 100) && (!requireSudden || suddenRise));
-
-    if (passesBasic) {
-      if (now - lastTrigger > cooldown) {
-        flashFlag.classList.add('show');
-        setTimeout(() => flashFlag.classList.remove('show'), 260);
-        if (armed) {
-          if (passesScene) { lastTrigger = now; onFlashDetected(); }
-          else { lastTrigger = now; log('ok', `Scartato dal filtro scena (unif ${Math.round(uniformity*100)}%)`); }
-        } else {
-          log('ok', `DEBUG Flash: soglia superata (Δ${delta.toFixed(1)}≥${threshold}) ma non sei armato`);
-        }
-      } else {
-        log('ok', `DEBUG Flash: soglia superata (Δ${delta.toFixed(1)}≥${threshold}) ma pausa non ancora scaduta (${Math.round(now - lastTrigger)}ms < ${cooldown}ms)`);
+      if (cameraScreenOn) {
+        histCounts[Math.min(HIST_BINS - 1, (lum / 256 * HIST_BINS) | 0)]++;
+        histRCounts[Math.min(HIST_BINS - 1, (r / 256 * HIST_BINS) | 0)]++;
+        histGCounts[Math.min(HIST_BINS - 1, (g / 256 * HIST_BINS) | 0)]++;
+        histBCounts[Math.min(HIST_BINS - 1, (b / 256 * HIST_BINS) | 0)]++;
+        const cb = (b - lum) * 0.564, cr = (r - lum) * 0.713;
+        const vx = Math.min(VECTOR_SIZE - 1, Math.max(0, Math.round(VECTOR_SIZE / 2 + cb / 128 * (VECTOR_SIZE / 2))));
+        const vy = Math.min(VECTOR_SIZE - 1, Math.max(0, Math.round(VECTOR_SIZE / 2 - cr / 128 * (VECTOR_SIZE / 2))));
+        vectorBuckets[vy * VECTOR_SIZE + vx]++;
       }
     }
-    prevDelta = delta;
+  }
 
-    // --- rilevamento movimento (modalità Animali) ---
+  const avg = sum / count / 255 * 100;
+  currentBrightness = avg;
+  if (baseline === null) baseline = avg;
+
+  // --- punteggi lampo e calo, sempre rispetto alla linea di base PRIMA dell'aggiornamento ---
+  const globalDelta = Math.max(0, avg - baseline);
+  let maxZone = 0;
+  for (let zi = 0; zi < ZONE_COUNT; zi++) {
+    const zAvg = zoneCounts[zi] ? zoneSums[zi] / zoneCounts[zi] / 255 * 100 : avg;
+    zoneNowBuf[zi] = zAvg;
+    if (zoneBaseline[zi] === null) zoneBaseline[zi] = zAvg;
+    const zd = zAvg - zoneBaseline[zi];
+    if (zd > maxZone) maxZone = zd;
+  }
+  let activeZones = 0;
+  for (let zi = 0; zi < ZONE_COUNT; zi++) {
+    if (Math.max(0, zoneNowBuf[zi] - zoneBaseline[zi]) >= globalDelta * 0.5) activeZones++;
+  }
+  const uniformity = activeZones / ZONE_COUNT;
+  let maxBand = 0;
+  const bandNow = new Array(BAND_COUNT);
+  for (let bi = 0; bi < BAND_COUNT; bi++) {
+    const bAvg = bandCounts[bi] ? bandSums[bi] / bandCounts[bi] / 255 * 100 : avg;
+    bandNow[bi] = bAvg;
+    if (bandBaseline[bi] === null) bandBaseline[bi] = bAvg;
+    const bd = bAvg - bandBaseline[bi];
+    if (bd > maxBand) maxBand = bd;
+  }
+  const flashScore = det.flash.partialOn ? Math.max(globalDelta, maxZone, maxBand) : globalDelta;
+  const beamScore = Math.max(0, baseline - avg);
+
+  const thF = effThreshold('flash');
+  const thB = effThreshold('beam');
+  const inFlashEvt = flashScore >= thF * 0.5;
+  const inBeamEvt = beamScore >= thB * 0.5;
+
+  // --- aggiornamento linee di base: congelate durante un evento ---
+  const hold = mode === 'beam' ? inBeamEvt : inFlashEvt;
+  if (hold) { if (detEventSince === null) detEventSince = now; } else detEventSince = null;
+  const relearn = detEventSince !== null && now - detEventSince > EVENT_RELEARN_MS;
+  const aBase = hold ? (relearn ? emaAlpha(dt, RELEARN_TAU_MS) : 0) : emaAlpha(dt, BASELINE_TAU_MS);
+  const aZone = hold ? (relearn ? emaAlpha(dt, RELEARN_TAU_MS) : 0) : emaAlpha(dt, ZONE_TAU_MS);
+  baseline += (avg - baseline) * aBase;
+  if (aZone > 0) {
+    for (let zi = 0; zi < ZONE_COUNT; zi++) zoneBaseline[zi] += (zoneNowBuf[zi] - zoneBaseline[zi]) * aZone;
+    for (let bi = 0; bi < BAND_COUNT; bi++) bandBaseline[bi] += (bandNow[bi] - bandBaseline[bi]) * aZone;
+  }
+
+  if (!inFlashEvt && !det.flash.calibrating) updateNoise(det.flash, flashScore, dt);
+  if (!inBeamEvt && !det.beam.calibrating) updateNoise(det.beam, beamScore, dt);
+  feedCalibration('flash', flashScore, now);
+  feedCalibration('beam', beamScore, now);
+
+  if (cameraScreenOn) {
+    drawHistogram(histCounts);
+    drawHistogramRGB(histRCounts, histGCounts, histBCounts);
+    drawVectorscope(vectorBuckets);
+  }
+
+  // --- movimento: confronto con ~66 ms prima, indipendente dagli fps ---
+  let motionStep = false;
+  if (now - lastMotionStepT >= MOTION_STEP_MS || !prevFrameLum) {
     const motionGridNow = new Array(MOTION_CELLS);
     let motionDiffSum = 0;
     for (let ci = 0; ci < MOTION_CELLS; ci++) {
@@ -3240,45 +3361,362 @@ function analyzeFrame() {
       motionGridNow[ci] = cAvg;
       if (prevFrameLum) motionDiffSum += Math.abs(cAvg - prevFrameLum[ci]);
     }
-    const motionScore = prevFrameLum ? (motionDiffSum / MOTION_CELLS) * 3 : 0;
+    det.motion.last = prevFrameLum ? (motionDiffSum / MOTION_CELLS) * 3 : 0;
     prevFrameLum = motionGridNow;
+    lastMotionStepT = now;
+    motionStep = true;
+  }
+  const motionScore = det.motion.last;
+  const thM = effThreshold('motion');
+  if (motionStep) {
+    if (motionScore < thM * 0.5 && !det.motion.calibrating) updateNoise(det.motion, motionScore, MOTION_STEP_MS);
+    feedCalibration('motion', motionScore, now);
+  }
+
+  // --- grafici: un punto ogni ~66 ms con il picco del periodo ---
+  det.flash.tracePeak = Math.max(det.flash.tracePeak, flashScore);
+  det.beam.tracePeak = Math.max(det.beam.tracePeak, beamScore);
+  det.motion.tracePeak = Math.max(det.motion.tracePeak, motionScore);
+  if (now - lastTraceStepT >= TRACE_STEP_MS) {
+    lastTraceStepT = now;
+    traceBuffer.push(det.flash.tracePeak); if (traceBuffer.length > TRACE_LEN) traceBuffer.shift();
+    beamTraceBuffer.push(det.beam.tracePeak); if (beamTraceBuffer.length > TRACE_LEN) beamTraceBuffer.shift();
+    motionTraceBuffer.push(det.motion.tracePeak); if (motionTraceBuffer.length > TRACE_LEN) motionTraceBuffer.shift();
+    det.flash.tracePeak = 0; det.beam.tracePeak = 0; det.motion.tracePeak = 0;
+    if (screenActive('flash')) drawTrace();
+    if (screenActive('beam')) drawBeamTrace();
+    if (screenActive('motion')) drawMotionTrace();
+  }
+
+  // --- letture a schermo: 10 volte al secondo bastano all'occhio ---
+  if (now - lastReadoutT >= READOUT_STEP_MS) {
+    lastReadoutT = now;
+    luxValue.textContent = flashScore.toFixed(1);
+    beamValue.textContent = beamScore.toFixed(1);
     motionValue.textContent = motionScore.toFixed(1);
+    if (mode === 'flash') uniformityValue.textContent = globalDelta > 1 ? Math.round(uniformity * 100) + '%' : '—';
+    updateDetReadouts(thF, thB, thM);
+  }
 
-    motionTraceBuffer.push(motionScore);
-    if (motionTraceBuffer.length > TRACE_LEN) motionTraceBuffer.shift();
-    if (document.getElementById('screen-motion').classList.contains('active')) drawMotionTrace();
+  // --- trigger Flash ---
+  if (flashScore >= thF && !det.flash.calibrating) {
+    const cooldown = parseFloat(cooldownEl.value);
+    if (now - lastTrigger > cooldown) {
+      const suddenRise = prevDelta < thF * 0.3;
+      const passesScene = !sceneFilterOn || (uniformity >= (parseFloat(uniformityMinEl.value) / 100) && (!requireSudden || suddenRise));
+      flashFlag.classList.add('show');
+      setTimeout(() => flashFlag.classList.remove('show'), 260);
+      if (armed) {
+        lastTrigger = now;
+        if (passesScene) onFlashDetected();
+        else log('ok', `Scartato dal filtro scena (unif ${Math.round(uniformity * 100)}%)`);
+      } else {
+        logThrottled('flash-unarmed', 'ok', `Lampo rilevato (Δ${flashScore.toFixed(1)} ≥ ${fmtN(thF)}) — sistema non armato`);
+      }
+    }
+  }
+  prevDelta = flashScore;
 
-    const motionThreshold = parseFloat(motionThresholdEl.value);
+  // --- trigger Animali ---
+  if (motionStep && motionScore >= thM && !det.motion.calibrating) {
     const motionCooldown = parseFloat(motionCooldownEl.value);
-    if (motionScore >= motionThreshold && now - lastMotionTrigger > motionCooldown) {
+    if (now - lastMotionTrigger > motionCooldown) {
       motionFlag.classList.add('show');
       setTimeout(() => motionFlag.classList.remove('show'), 260);
       if (motionArmed) { lastMotionTrigger = now; onMotionDetected(); }
     }
+  }
 
-    // --- rilevamento calo di luce (modalità Raggio) — usa la stessa
-    // coppia avg/baseline già calcolata sopra per Flash, letta al
-    // contrario: un calo invece di un aumento. ---
-    const beamDrop = Math.max(0, baseline - avg);
-    beamValue.textContent = beamDrop.toFixed(1);
-    beamTraceBuffer.push(beamDrop);
-    if (beamTraceBuffer.length > TRACE_LEN) beamTraceBuffer.shift();
-    if (document.getElementById('screen-beam').classList.contains('active')) drawBeamTrace();
-
-    const beamThreshold = parseFloat(beamThresholdEl.value);
+  // --- trigger Raggio ---
+  if (beamScore >= thB && !det.beam.calibrating) {
     const beamCooldown = parseFloat(beamCooldownEl.value);
-    if (beamDrop >= beamThreshold) {
-      if (now - lastBeamTrigger > beamCooldown) {
-        beamFlag.classList.add('show');
-        setTimeout(() => beamFlag.classList.remove('show'), 260);
-        if (beamArmed) { lastBeamTrigger = now; onBeamDetected(); }
-        else log('ok', `DEBUG Raggio: soglia superata (calo${beamDrop.toFixed(1)}≥${beamThreshold}) ma non sei armato`);
-      } else {
-        log('ok', `DEBUG Raggio: soglia superata (calo${beamDrop.toFixed(1)}≥${beamThreshold}) ma pausa non ancora scaduta (${Math.round(now - lastBeamTrigger)}ms < ${beamCooldown}ms)`);
-      }
+    if (now - lastBeamTrigger > beamCooldown) {
+      beamFlag.classList.add('show');
+      setTimeout(() => beamFlag.classList.remove('show'), 260);
+      if (beamArmed) { lastBeamTrigger = now; onBeamDetected(); }
+      else logThrottled('beam-unarmed', 'ok', `Raggio interrotto (calo ${beamScore.toFixed(1)} ≥ ${fmtN(thB)}) — sistema non armato`);
     }
   }
 }
+
+// ---------- letture soglia / rumore / fps nei mirini ----------
+const detReadoutEls = {};
+function injectDetReadouts() {
+  [['flash', 'screen-flash'], ['beam', 'screen-beam'], ['motion', 'screen-motion']].forEach(([kind, id]) => {
+    const ro = document.querySelector('#' + id + ' .readout');
+    if (!ro) return;
+    const extra = document.createElement('span');
+    extra.style.cssText = 'display:contents;';
+    extra.innerHTML = `<span class="lbl" style="margin-left:8px;">soglia</span><span data-ro="th">—</span>` +
+      `<span class="lbl" style="margin-left:8px;">rum.</span><span data-ro="noise">—</span>` +
+      (kind === 'flash' ? `<span class="lbl" style="margin-left:8px;">fps</span><span data-ro="fps">—</span>` : '');
+    ro.appendChild(extra);
+    detReadoutEls[kind] = {
+      th: extra.querySelector('[data-ro="th"]'),
+      noise: extra.querySelector('[data-ro="noise"]'),
+      fps: extra.querySelector('[data-ro="fps"]'),
+    };
+  });
+}
+injectDetReadouts();
+
+function updateDetReadouts(thF, thB, thM) {
+  const ths = { flash: thF, beam: thB, motion: thM };
+  Object.keys(detReadoutEls).forEach(kind => {
+    const els = detReadoutEls[kind], d = det[kind];
+    els.th.textContent = (d.autoOn && d.noiseN >= 20 ? 'A ' : '') + fmtN(ths[kind]);
+    els.noise.textContent = d.noiseN >= 20 ? fmtN(Math.sqrt(d.noiseV)) : '—';
+    if (els.fps) els.fps.textContent = analyzeFps ? Math.round(analyzeFps) : '—';
+  });
+}
+
+// ---------- calibrazione guidata ----------
+const CAL_NOISE_MS = 3000;
+const CAL_TEST_MS = 12000;
+const CAL_TEXT = {
+  flash: { label: 'Flash', test: 'Ora fai un lampo davanti al telefono (flash, o una torcia accesa di colpo)' },
+  beam: { label: 'Raggio', test: 'Ora interrompi il raggio: passa la mano davanti alla luce' },
+  motion: { label: 'Animali', test: 'Ora muoviti nell\'inquadratura come farebbe il soggetto' },
+};
+const calibUI = {};
+
+function noiseStats(samples) {
+  const n = samples.length;
+  const mean = samples.reduce((a, b) => a + b, 0) / n;
+  const std = Math.sqrt(samples.reduce((a, b) => a + (b - mean) * (b - mean), 0) / n);
+  const sorted = samples.slice().sort((a, b) => a - b);
+  const p99 = sorted[Math.min(n - 1, Math.floor(n * 0.99))];
+  return { mean, std, p99, max: sorted[n - 1], n };
+}
+
+function setThresholdValue(el, v) {
+  const min = parseFloat(el.min), max = parseFloat(el.max), step = parseFloat(el.step) || 1;
+  const clamped = Math.min(max, Math.max(min, Math.round(v / step) * step));
+  el.value = clamped.toFixed(step < 1 ? 1 : 0);
+  el.dispatchEvent(new Event('input'));
+  return parseFloat(el.value);
+}
+
+function startCalibration(kind) {
+  det[kind].calibrating = { phase: 'noise', t0: performance.now(), samples: [], peak: 0, peakT: 0 };
+  setCalibStatus(kind, 'Misuro il rumore… tieni fermo il telefono sulla scena reale, senza lampi (3 s)', '');
+  updateCalibButtons(kind);
+  log('ok', `Calibrazione ${CAL_TEXT[kind].label}: misura del rumore`);
+}
+
+function cancelCalibration(kind) {
+  det[kind].calibrating = null;
+  setCalibStatus(kind, 'Calibrazione annullata', '');
+  updateCalibButtons(kind);
+}
+
+function feedCalibration(kind, score, now) {
+  const c = det[kind].calibrating;
+  if (!c) return;
+  if (c.phase === 'noise') {
+    c.samples.push(score);
+    if (now - c.t0 >= CAL_NOISE_MS && c.samples.length >= 20) {
+      const st = noiseStats(c.samples);
+      c.noise = st;
+      c.ceil = Math.max(st.mean + 6 * st.std, st.p99 * 1.3, st.max * 1.1, 0.3);
+      c.phase = 'test'; c.t0 = now;
+      setCalibStatus(kind, `Rumore ${fmtN(st.mean)} ± ${fmtN(st.std)}. ${CAL_TEXT[kind].test} — oppure “Salta”.`, '');
+      updateCalibButtons(kind);
+    }
+  } else if (c.phase === 'test') {
+    if (score > c.peak) { c.peak = score; c.peakT = now; }
+    const gotEvent = c.peak >= c.ceil * 2;
+    if ((gotEvent && now - c.peakT > 600) || now - c.t0 > CAL_TEST_MS) finishCalibration(kind, false);
+  }
+}
+
+function finishCalibration(kind, skipTest) {
+  const d = det[kind], c = d.calibrating;
+  if (!c || !c.noise) { cancelCalibration(kind); return; }
+  const st = c.noise, ceil = c.ceil;
+  const peak = skipTest ? 0 : c.peak;
+  let th, msg, cls = 'ok';
+  if (peak >= ceil * 2) {
+    th = ceil + (peak - ceil) * 0.3;
+    const margin = peak / ceil;
+    msg = `Soglia ${fmtN(th)} · evento di prova ${fmtN(peak)} · margine ×${margin.toFixed(1)} sul rumore`;
+    if (margin < 4) { msg += ' — margine basso: avvicina il telefono o scurisci la scena'; cls = 'warn'; }
+  } else if (peak > ceil) {
+    th = ceil + (peak - ceil) * 0.5;
+    msg = `Evento di prova debole (${fmtN(peak)}): soglia ${fmtN(th)}, rilevamento al limite`;
+    cls = 'warn';
+  } else {
+    th = ceil;
+    msg = skipTest
+      ? `Soglia ${fmtN(th)}, appena sopra il rumore`
+      : `Nessun evento di prova visto: soglia ${fmtN(th)}, appena sopra il rumore`;
+    if (!skipTest) cls = 'warn';
+  }
+  const applied = setThresholdValue(d.el, th);
+  if (st.std > 0) {
+    d.autoK = Math.min(30, Math.max(3, (applied - st.mean) / st.std));
+    localStorage.setItem('ft_autok_' + d.key, d.autoK.toFixed(1));
+  }
+  d.noiseM = st.mean; d.noiseV = st.std * st.std; d.noiseN = Math.max(d.noiseN, 50);
+  localStorage.setItem('ft_calib_' + d.key, JSON.stringify({ mean: st.mean, std: st.std, ceil, peak, th: applied, at: Date.now() }));
+  d.calibrating = null;
+  setCalibStatus(kind, msg, cls);
+  updateCalibButtons(kind);
+  syncAutoUI(kind);
+  log('ok', `Calibrazione ${CAL_TEXT[kind].label}: ${msg}`);
+}
+
+function setCalibStatus(kind, text, cls) {
+  const ui = calibUI[kind]; if (!ui) return;
+  ui.status.textContent = text;
+  ui.status.className = 'calib-status' + (cls ? ' ' + cls : '');
+}
+
+function updateCalibButtons(kind) {
+  const ui = calibUI[kind]; if (!ui) return;
+  const c = det[kind].calibrating;
+  ui.btn.textContent = c ? 'Annulla' : 'Calibra';
+  ui.skip.classList.toggle('hidden-panel', !(c && c.phase === 'test'));
+}
+
+function syncAutoUI(kind) {
+  const ui = calibUI[kind]; if (!ui) return;
+  const d = det[kind];
+  ui.auto.setAttribute('aria-checked', d.autoOn ? 'true' : 'false');
+  ui.kWrap.classList.toggle('hidden-panel', !d.autoOn);
+  ui.k.value = d.autoK;
+  ui.kVal.textContent = d.autoK.toFixed(1) + 'σ';
+  const manualCtrl = d.el.closest('.ctrl');
+  if (manualCtrl) manualCtrl.style.opacity = d.autoOn ? '0.45' : '1';
+  if (ui.partial) ui.partial.setAttribute('aria-checked', det.flash.partialOn ? 'true' : 'false');
+}
+
+function savedCalibText(kind) {
+  try {
+    const s = JSON.parse(localStorage.getItem('ft_calib_' + det[kind].key) || 'null');
+    if (!s) return 'Non calibrato: inquadra la scena reale e premi Calibra';
+    const dt = new Date(s.at);
+    return `Ultima calibrazione ${dt.toLocaleDateString('it-IT')} ${dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })} · soglia ${fmtN(s.th)} · rumore ${fmtN(s.mean)} ± ${fmtN(s.std)}`;
+  } catch (e) { return 'Non calibrato'; }
+}
+
+function buildCalibPanel(kind, sheetId) {
+  const sheet = document.getElementById(sheetId);
+  if (!sheet) return;
+  const title = sheet.querySelector('.sheet-title');
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = `
+    <div class="field-row">
+      <span class="name">Calibrazione guidata</span>
+      <span style="display:flex; gap:8px;">
+        <button class="btn-ghost hidden-panel" data-cal="skip">Salta</button>
+        <button class="btn-ghost" data-cal="btn">Calibra</button>
+      </span>
+    </div>
+    <div class="calib-status" data-cal="status"></div>
+    <div class="field-row">
+      <span class="name">Soglia automatica (segue il rumore)</span>
+      <button class="switch" role="switch" aria-checked="false" data-cal="auto"><span class="switch-knob"></span></button>
+    </div>
+    <div class="ctrl hidden-panel" data-cal="kwrap">
+      <div class="ctrl-head"><span class="name">Margine sul rumore</span><span class="num" data-cal="kval">6σ</span></div>
+      <input type="range" min="3" max="30" step="0.5" value="6" data-cal="k">
+    </div>
+    ${kind === 'flash' ? `<div class="field-row">
+      <span class="name">Rileva lampi parziali (zone e bande)</span>
+      <button class="switch" role="switch" aria-checked="true" data-cal="partial"><span class="switch-knob"></span></button>
+    </div>` : ''}
+    <div class="field-row">
+      <span class="name">Blocca esposizione del telefono</span>
+      <button class="switch exp-lock-switch" role="switch" aria-checked="false" data-cal="exp"><span class="switch-knob"></span></button>
+    </div>`;
+  title.after(panel);
+  const q = k => panel.querySelector(`[data-cal="${k}"]`);
+  const ui = calibUI[kind] = {
+    btn: q('btn'), skip: q('skip'), status: q('status'), auto: q('auto'),
+    kWrap: q('kwrap'), k: q('k'), kVal: q('kval'), partial: q('partial'), exp: q('exp'),
+  };
+  const d = det[kind];
+  ui.btn.onclick = () => d.calibrating ? cancelCalibration(kind) : startCalibration(kind);
+  ui.skip.onclick = () => finishCalibration(kind, true);
+  ui.auto.onclick = () => {
+    d.autoOn = !d.autoOn;
+    localStorage.setItem('ft_auto_' + d.key, d.autoOn ? '1' : '0');
+    syncAutoUI(kind);
+  };
+  ui.k.oninput = () => {
+    d.autoK = parseFloat(ui.k.value);
+    localStorage.setItem('ft_autok_' + d.key, ui.k.value);
+    ui.kVal.textContent = d.autoK.toFixed(1) + 'σ';
+  };
+  if (ui.partial) ui.partial.onclick = () => {
+    det.flash.partialOn = !det.flash.partialOn;
+    localStorage.setItem('ft_partial', det.flash.partialOn ? '1' : '0');
+    syncAutoUI(kind);
+  };
+  ui.exp.onclick = () => setExposureLock(!exposureLockOn);
+  setCalibStatus(kind, savedCalibText(kind), '');
+  syncAutoUI(kind);
+  syncExposureSwitches();
+}
+
+// ---------- blocco esposizione del telefono ----------
+// Con l'esposizione automatica il telefono "compensa" da solo: dopo un
+// lampo scurisce, dopo un'ombra schiarisce — e quelle correzioni sembrano
+// eventi. Bloccandola, la luminosità misurata cambia solo se cambia la scena.
+let exposureLockOn = localStorage.getItem('ft_exposure_lock') === '1';
+function syncExposureSwitches() {
+  document.querySelectorAll('.exp-lock-switch').forEach(s => s.setAttribute('aria-checked', exposureLockOn ? 'true' : 'false'));
+}
+async function setExposureLock(on, silent = false) {
+  exposureLockOn = on;
+  localStorage.setItem('ft_exposure_lock', on ? '1' : '0');
+  syncExposureSwitches();
+  const track = getPhoneVideoTrack();
+  if (!track || !track.getCapabilities) return;
+  const caps = track.getCapabilities();
+  const settings = track.getSettings ? track.getSettings() : {};
+  const c = {};
+  if (caps.exposureMode) {
+    if (on && caps.exposureMode.includes('manual')) {
+      c.exposureMode = 'manual';
+      if (caps.exposureTime && settings.exposureTime) c.exposureTime = settings.exposureTime;
+    } else if (!on && caps.exposureMode.includes('continuous')) {
+      c.exposureMode = 'continuous';
+    }
+  }
+  if (!Object.keys(c).length) {
+    if (on && !silent) log('error', 'Questo telefono/browser non permette di bloccare l\'esposizione: calibra comunque, la soglia automatica compensa in parte');
+    return;
+  }
+  try {
+    await track.applyConstraints({ advanced: [c] });
+    resetDetectionState();
+    if (!silent) log('ok', on ? 'Esposizione del telefono bloccata' : 'Esposizione del telefono automatica');
+  } catch (e) {
+    log('error', 'Blocco esposizione non riuscito: ' + e.message);
+  }
+}
+
+// ---------- schermo sempre acceso quando qualcosa è armato ----------
+let wakeLock = null, wakeLockPending = false;
+async function updateWakeLock() {
+  if (!('wakeLock' in navigator) || wakeLockPending) return;
+  const need = armed || motionArmed || beamArmed || scheduleActive;
+  wakeLockPending = true;
+  try {
+    if (need && !wakeLock && document.visibilityState === 'visible') {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!need && wakeLock) {
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  } catch (e) { /* non critico */ }
+  finally { wakeLockPending = false; }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') updateWakeLock(); });
 
 async function onFlashDetected() {
   if (shootSourceSelect.value !== 'phone' && !cameraConnected && !bleConnected) { log('error', 'Fotocamera non connessa'); return; }
@@ -3312,6 +3750,7 @@ async function onBeamDetected() {
 
 // ---------- badge nel drawer ----------
 function updateBadges() {
+  updateWakeLock();
   const bF = document.getElementById('badgeFlash');
   bF.textContent = armed ? 'ARMATO' : '';
   bF.className = 'badge' + (armed ? ' on-flash' : '');
@@ -3838,6 +4277,9 @@ function stopSchedule(finished = false) {
   }
 }
 
+buildCalibPanel('flash', 'sheet');
+buildCalibPanel('beam', 'beamSheet');
+buildCalibPanel('motion', 'motionSheet');
 startCamPreview(localStorage.getItem('ft_phone_camera_id') || undefined);
 tryAutoConnect();
 refreshStats();
